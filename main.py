@@ -9,7 +9,7 @@ from horary import CITIES, TOPICS, HOUSE_MEANINGS, FOCUS_CHOICES, ClarificationR
 
 from question_context import infer_context, ROLE_OPTIONS, RELATION_OPTIONS
 
-app=FastAPI(title='АстроЛично — персональная астрология', version='1.1.0')
+app=FastAPI(title='АстроЛично — персональная астрология', version='1.2.0')
 DIR=Path(__file__).parent
 app.mount('/static',StaticFiles(directory=DIR/'static'),name='static')
 
@@ -48,7 +48,7 @@ def config():
 
 @app.get('/api/health')
 def health():
-    return {'ok':True,'version':'1.1.0'}
+    return {'ok':True,'version':'1.2.0'}
 
 class AnalyzeRequest(BaseModel):
     question:str=Field(max_length=500)
@@ -70,21 +70,26 @@ def chart(body:HoraryRequest):
 
 
 class AstroRequest(BaseModel):
-    mode:Literal['natal','transits','day','period','solar','lunar','compatibility','progression','direction','sign']
+    mode:Literal['natal','transits','day','period','solar','lunar','compatibility','progression','direction','sign','integrated']
     profile:dict
     second_profile:dict|None=None
     date:str|None=None
     end_date:str|None=None
     solar_year:int|None=None
+    past_events:list[dict]|None=None
+    control_dates:list[dict]|None=None
 
 @app.get('/api/astro/config')
 def astro_config():
-    return {'version':portal.VERSION,'cities':CITIES,'modes':['natal','transits','day','period','solar','lunar','compatibility','progression','direction','sign']}
+    return {'version':portal.VERSION,'cities':CITIES,'modes':['natal','transits','day','period','solar','lunar','compatibility','progression','direction','sign','integrated']}
 
 @app.post('/api/astro/report')
 def astro_report(body:AstroRequest):
     try:
         m=body.mode
+        if m=='integrated':
+            from integrated_forecast import integrated
+            return integrated(body.profile,body.date,body.end_date,body.past_events,body.control_dates)
         if m=='natal':return portal.natal(body.profile)
         if m=='sign':return portal.sign_profile(body.profile)
         if m in ('transits','day'):return portal.transit(body.profile,body.date, 'day' if m=='day' else 'transit')

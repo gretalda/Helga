@@ -14,7 +14,7 @@ import swisseph as swe
 from horary import CITIES
 import forecast_writer as writer
 
-VERSION = '1.1.0'
+VERSION = '1.2.0'
 PLANETS = {'Солнце':swe.SUN, 'Луна':swe.MOON, 'Меркурий':swe.MERCURY,
            'Венера':swe.VENUS,'Марс':swe.MARS,'Юпитер':swe.JUPITER,
            'Сатурн':swe.SATURN,'Уран':swe.URANUS,'Нептун':swe.NEPTUNE,'Плутон':swe.PLUTO}
@@ -356,7 +356,7 @@ def progressions(profile,day,method='progression'):
     if not secs:secs=[{'title':'Фон периода','body':'В узком орбисе 0,8° не найдено мажорных аспектов к натальным планетам. Это не является выводом об отсутствии важных перемен.'}]
     result={'type':method,'title':'Вторичные прогрессии' if method=='progression' else 'Символические дирекции',
             'lead':f"На {d.strftime('%d.%m.%Y')} возраст в методе составляет {age:.2f} года. "+('В прогрессиях каждому году жизни соответствует примерно один день после рождения.' if method=='progression' else 'В дирекциях используется дуга 1° за год.'),
-            'sections':secs,'chart':public_chart(c),'overlay':{name:round(x['lon'],5) for name,x in moving.items()},
+            'sections':secs,'chart':public_chart(c),'contacts':matches,'overlay':{name:round(x['lon'],5) for name,x in moving.items()},
             'highlights':[{'label':'Возраст','value':f'{age:.1f} года'},{'label':'Близких аспектов','value':str(len(matches))}],
             'note':'Прогрессии и дирекции — символические астрологические методы. Для прогнозного вывода требуется сопоставление с наталом и другими техниками.'}
     return writer.progression_consultation(result,c,moving,matches,date=day,method=method,house_of=house_of)

@@ -7,7 +7,7 @@ from horary import CITIES, TOPICS, HOUSE_MEANINGS, FOCUS_CHOICES, ClarificationR
 
 from question_context import infer_context, ROLE_OPTIONS, RELATION_OPTIONS
 
-app=FastAPI(title='АстроЛично — Хорар', version='0.6.0')
+app=FastAPI(title='АстроЛично — Хорар', version='0.7.0')
 DIR=Path(__file__).parent
 app.mount('/static',StaticFiles(directory=DIR/'static'),name='static')
 
@@ -15,6 +15,7 @@ class HoraryRequest(BaseModel):
     question:str=Field(max_length=500)
     topic:str|None=None
     focus_choice:str|None=None
+    manual_focus_text:str|None=None
     datetime:str
     city:str='minsk'
     city_name:str|None=None
@@ -36,7 +37,7 @@ def config():
 
 @app.get('/api/health')
 def health():
-    return {'ok':True,'version':'0.6.0'}
+    return {'ok':True,'version':'0.7.0'}
 
 class AnalyzeRequest(BaseModel):
     question:str=Field(max_length=500)

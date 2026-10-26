@@ -138,6 +138,23 @@ def infer_context(question):
             'reason':'Связи определены по тексту' if complete else 'Не хватает сведений о связях участников с вопрошающим'}
 
 
+def user_description(provided, key, label):
+    value = str(provided.get(key) or '').strip()
+    if not 3 <= len(value) <= 120:
+        raise ValueError(f'Для варианта «Вручную» заполните поле «{label}» (от 3 до 120 символов).')
+    return value
+
+
+def selected_house(provided, key, label):
+    try:
+        val = int(provided.get(key))
+    except (TypeError, ValueError):
+        raise ValueError(f'Для варианта «Вручную» выберите {label}.') from None
+    if not 1 <= val <= 12:
+        raise ValueError(f'Для варианта «Вручную» выберите {label} от I до XII.')
+    return val
+
+
 def resolve_two_people(question, provided=None, manual_house=None):
     detected=infer_context(question)
     if detected['mode'] != 'two_people':
@@ -152,31 +169,51 @@ def resolve_two_people(question, provided=None, manual_house=None):
     relation=provided.get('relation_to_first') or detected['relation_to_first']
     if first not in ROLE_OPTIONS:
         raise ValueError('Уточните, кто первый человек для вас.')
-    first_house=provided.get('first_house') if first=='other' else None
-    try:
-        first_house=int(first_house) if first_house else None
-    except (ValueError,TypeError):
-        raise ValueError('Укажите дом первого человека числом от 2 до 12.')
-    if first=='other' and (first_house is None or not 2<=first_house<=12):
-        raise ValueError('Для нестандартной связи выберите дом первого человека вручную.')
     if relation and relation not in RELATION_OPTIONS:
         raise ValueError('Неизвестная связь между участниками.')
     if second and second not in ROLE_OPTIONS:
         raise ValueError('Неизвестная связь второго человека с вами.')
-    h1=first_house if first=='other' else ROLE_OPTIONS[first]['house']
-    if relation and RELATION_OPTIONS[relation]['house']:
+
+    # Manual relations always carry both a readable description and an explicit
+    # house choice; never invent a house from an unknown kinship.
+    first_label = ROLE_OPTIONS[first]['label']
+    if first == 'other':
+        first_label=user_description(provided,'first_role_text','Кто первый человек для вас?')
+        h1=selected_house(provided,'first_house','дом первого человека')
+    else:
+        h1=ROLE_OPTIONS[first]['house']
+
+    if relation == 'other':
+        rel_label=user_description(provided,'relation_text','Кем второй человек является первому?')
+        derivative=selected_house(provided,'relation_house','дом второго человека от первого')
+        h2=((h1-1+derivative-1)%12)+1
+        mode=f'производный: {derivative}-й от {h1}-го (вручную)'
+        second_label=rel_label
+        explain_second=f'{name_second}: {derivative}-й дом от {h1}-го = {h2}-й дом ({rel_label}, ручной выбор).'
+    elif relation and RELATION_OPTIONS[relation]['house']:
         derivative=RELATION_OPTIONS[relation]['house']
         h2=((h1-1+derivative-1)%12)+1
         mode=f'производный: {derivative}-й от {h1}-го'
-        label=f"{name_first} ({ROLE_OPTIONS[first]['label']}) и {name_second} ({RELATION_OPTIONS[relation]['label']})"
+        second_label=RELATION_OPTIONS[relation]['label']
+        explain_second=f'{name_second}: {derivative}-й дом от {h1}-го = {h2}-й дом.'
+    elif second == 'other':
+        second_label=user_description(provided,'second_role_text','Кто второй человек для вас?')
+        h2=selected_house(provided,'second_house','дом второго человека')
+        mode='непосредственно от I дома (вручную)'
+        explain_second=f'{name_second}: {h2}-й дом ({second_label}, ручной выбор).'
     elif second and ROLE_OPTIONS[second]['house']:
         h2=ROLE_OPTIONS[second]['house']
         mode='непосредственно от I дома'
-        label=f"{name_first} ({ROLE_OPTIONS[first]['label']}) и {name_second} ({ROLE_OPTIONS[second]['label']})"
+        second_label=ROLE_OPTIONS[second]['label']
+        explain_second=f'{name_second}: {h2}-й дом ({second_label}).'
     elif manual_house:
-        h2=manual_house;mode='вручную';label=f"{name_first} и {name_second}"
+        h2=manual_house
+        mode='вручную'
+        second_label='дом предмета вопроса'
+        explain_second=f'{name_second}: {h2}-й дом (вручную).'
     else:
         raise ValueError('Укажите, кем второй человек является первому, либо кем он приходится лично вам.')
+    label=f'{name_first} ({first_label}) и {name_second} ({second_label})'
     effective_source=(not provided or not any(str(provided.get(k) or '') and str(provided.get(k)) != str(detected.get(k) or '') for k in ('first_role','second_role','relation_to_first','first_name','second_name')))
     if h1==h2:
         caution='Обе стороны попали в один дом. Для независимого суждения могут понадобиться дополнительные сигнификаторы и уточнение отношений.'
@@ -185,5 +222,4 @@ def resolve_two_people(question, provided=None, manual_house=None):
     return {'topic':'relationship','house':h2,'actor_house':h1,'method':'автоматически по тексту' if effective_source else 'участники уточнены пользователем',
             'label':label,'caution':caution,
             'participants':{'first':name_first,'second':name_second,'first_role':first,'second_role':second,'relation_to_first':relation},
-            'house_explanation':f"{name_first}: {h1}-й дом ({ROLE_OPTIONS[first]['label']}). "
-                  + (f"{name_second}: {derivative}-й дом от {h1}-го = {h2}-й дом." if relation and RELATION_OPTIONS[relation]['house'] else f"{name_second}: {h2}-й дом ({mode}).")}
+            'house_explanation':f'{name_first}: {h1}-й дом ({first_label}). {explain_second}'}

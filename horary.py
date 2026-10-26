@@ -91,7 +91,7 @@ def question_kind(question):
     return 'yesno'
 
 
-def resolve_question(question, requested_topic=None, focus_choice=None, manual_house=None, people_context=None):
+def resolve_question(question, requested_topic=None, focus_choice=None, manual_house=None, people_context=None, manual_focus_text=None):
     detected=infer_context(question)
     if detected["mode"] == "two_people":
         try:
@@ -102,11 +102,14 @@ def resolve_question(question, requested_topic=None, focus_choice=None, manual_h
     if focus_choice:
         if focus_choice not in FOCUS_CHOICES: raise ValueError('Неизвестный тип участника вопроса.')
         chosen=FOCUS_CHOICES[focus_choice]
-        if focus_choice == 'other' and manual_house is None:
-            raise ClarificationRequired('Для темы «Другое» откройте расширенные настройки и выберите дом предмета вопроса.')
+        if focus_choice == 'other':
+            if not manual_focus_text or not 3<=len(manual_focus_text.strip())<=120:
+                raise ClarificationRequired('Для «Другого» напишите, о ком или о чём вопрос, в появившемся поле.')
+            if manual_house is None:
+                raise ClarificationRequired('Для варианта «Другое» выберите дом в поле «Какой дом берём для вопроса?».')
         house=manual_house if manual_house is not None else chosen['house']
         return {'topic':chosen['topic'] if chosen['topic'] in TOPICS else 'other', 'house':house,
-                'method':'уточнение пользователя', 'label':chosen['label'], 'actor_house':1,
+                'method':'уточнение пользователя', 'label':('Другое: '+manual_focus_text.strip()) if focus_choice=='other' else chosen['label'], 'actor_house':1,
                 'caution':'Дом выбран по уточнению пользователя; вопросы о третьих лицах требуют проверки производных домов.'}
     if requested_topic in TOPICS:
         return {'topic':requested_topic,'house':manual_house or TOPICS[requested_topic]['house'],
@@ -489,6 +492,104 @@ def essential_dignity(planet, zodiac, is_day=False):
             [f'в {x}' for x in profile['weaknesses']]) or ['без собственных эссенциальных достоинств']
 
 
+
+# Friendly focus for simple yes/no outcomes. The signification is *not*
+# evidence that any future event will occur; judgements remain conditional.
+def requested_outcome(question):
+    q=question.lower().replace('ё','е')
+    groups=[
+      (r'расстан|разойд|развед|разрыв|разлуч|разорвет отношения', 'расставание', 'negative'),
+      (r'помир|примир|сойдутся|возобновят отношения|вернутся друг к другу','примирение', 'positive'),
+      (r'позвон|перезвон|созвон|телефонн','звонок', 'positive'),
+      (r'напиш|ответит|свяж|сообщен|письм','сообщение или связь', 'positive'),
+      (r'заплат|выплат|оплат|перевед.*деньг|пришл.*деньг|вернет.*деньг|вернут.*деньг','выплата денег', 'positive'),
+      (r'встрет|увид|свидани|приед|прилет','встреча или приезд', 'positive'),
+      (r'пожен|женит|замуж|свадьб|брак','заключение брака', 'positive'),
+      (r'подар|вручит|подарок','подарок', 'positive'),
+      (r'выдад|отдадут|забер|получу .*машин|вернут .*машин','передача вещи или автомобиля', 'positive'),
+      (r'верн[её]тся|вернутся|возвратится|прибудет','возвращение', 'positive'),
+      (r'устроит.*работ|найдет работу|возьмут на работу|трудоустро','трудоустройство', 'positive'),
+      (r'получ.*повышен|повысят|назначат на должност','повышение', 'positive'),
+    ]
+    for rx,label,polarity in groups:
+        if re.search(rx,q):return label,polarity
+    return None,'positive'
+
+
+def short_person_context(resolution):
+    p=resolution.get('participants') or {}
+    if p.get('first') and p.get('second'):
+        return f"пары «{p['first']} — {p['second']}»"
+    return 'этой ситуации'
+
+
+def outcome_based_answer(question,kind,resolution,original,aspect,horizon,recep,obstructions):
+    """Turn generic astrological wording into a judgement addressing the question.
+
+    Avoid mapping a harmonious aspect mechanically to the success of harmful or
+    separating events. Presence of a signification is not factual prediction.
+    """
+    out,polarity=requested_outcome(question)
+    target=short_person_context(resolution)
+    exact=aspect is not None and (horizon is None or aspect['days']<=horizon)
+    within=(f'в ближайшие {horizon} дн.' if horizon else 'без установленного срока')
+    if kind=='yesno' and out=='расставание':
+        if exact and aspect['angle'] in (90,180):
+            label='Разрыв возможен, но не подтверждён'
+            summary=f'Для {target} есть символический признак напряжения (сходящийся {aspect["name"].lower()}). Однако этого недостаточно, чтобы утверждать, что они расстанутся {within}.'
+        elif exact:
+            label='Расставание пока не подтверждается'
+            summary=f'Для {target} точный сходящийся аспект скорее указывает на взаимодействие сторон, а не доказывает прекращение связи. Утверждать, что они расстанутся {within}, по этим данным нельзя.'
+        else:
+            label='Расставание пока не подтверждается'
+            summary=f'Для {target} расчёт не выявил достаточных прямых признаков разрыва {within}. Это не означает, что отношения обязательно сохранятся.'
+        return {'kind':'mixed' if exact and aspect['angle'] in (90,180) else 'unclear','label':label,'summary':summary,
+                'reasons':['Расставание нельзя определять по одному факту наличия или отсутствия сходящегося аспекта.',
+                           'Для окончательного хорарного суждения нужны признаки разъединения, проверка Луны и вмешательства, которые ещё не все реализованы.'],
+                'note':'Это символическое суждение по карте, а не наблюдение за чужой жизнью или достоверный прогноз.'}
+    if kind=='yesno' and out:
+        if original['kind']=='positive':label=f'По вопросу «{out}»: скорее да'
+        elif original['kind']=='mixed':label=f'{out.capitalize()}: возможно, но с препятствиями'
+        elif original['kind']=='caution':label=f'{out.capitalize()} {within} не подтверждается'
+        else:label=f'{out.capitalize()}: уверенного ответа пока нет'
+        s={'звонок':'самого звонка','сообщение или связь':'контакта','выплата денег':'поступления денег','встреча или приезд':'встречи или приезда',
+           'заключение брака':'брака','подарок':'подарка','передача вещи или автомобиля':'передачи вещи','возвращение':'возвращения','трудоустройство':'выхода на работу','повышение':'повышения','примирение':'примирения'}.get(out,out)
+        if exact:
+            sentence=(f'По карте есть признак возможного {s} {within}.' if aspect['angle'] in (0,60,120)
+                     else f'По карте есть возможное движение к {s}, но сходящийся напряжённый аспект говорит о трудностях.')
+        else:sentence=f'Прямого подтверждения {s} {within} в рассчитанных главных аспектах пока нет.'
+        original.update(label=label, summary=sentence+' Это предварительный вывод; реальные действия людей карта не устанавливает.')
+        return original
+    if kind=='direction':
+        subject=target if target!='этой ситуации' else 'этой ситуации'
+        if not exact:
+            label='Убедительного развития пока не видно'
+            summary=f'Для {subject} расчёт пока не выявил прямого сходящегося аспекта главных управителей до выхода из знака. Нельзя уверенно утверждать ни укрепление, ни разрыв.'
+            status='unclear'
+        elif aspect['angle'] in (90,180):
+            label='Развитие вероятно, но через напряжение'
+            summary=f'Для {subject} есть показатель дальнейшего взаимодействия, но сходящийся {aspect["name"].lower()} символически указывает на конфликт или препятствия. Считать это гарантией расставания или примирения нельзя.'
+            status='mixed'
+        elif recep.get('mutual'):
+            label='Есть основания ожидать сближения'
+            summary=f'Для {subject} есть сходящийся {aspect["name"].lower()} и взаимная рецепция. В традиционном хораре сочетание рассматривают как поддержку развития связи, но оно не доказывает будущих поступков.'
+            status='positive'
+        else:
+            label='Контакт возможен, устойчивость отношений неясна'
+            summary=f'У {subject} ожидается сходящийся {aspect["name"].lower()}, но взаимной рецепции не обнаружено. Карта показывает возможность взаимодействия, однако не подтверждает устойчивого сближения.'
+            status='mixed'
+        return {'kind':status,'label':label,'summary':summary,
+                'reasons': ([f'Главные управители идут к {aspect["name"].lower()}.' if exact else 'Прямого точного будущего аспекта до смены знака не найдено.']+
+                            [f'Рецепции: {recep["summary"]}']+
+                            (['Найдены кандидаты на препятствующие аспекты; это ещё не доказанный запрет.'] if obstructions else [])),
+                'note':'Это трактовка символов карты, не проверка реальной жизни или чувств людей.'}
+    if kind=='status':
+        a='Есть признаки взаимодействия сторон' if exact else 'Текущее состояние связи неясно'
+        original['label']=a
+        original['summary']=f'Для {target} '+('обнаружен будущий точный аспект основных показателей, указывающий на возможный контакт. ' if exact else 'не найден прямой будущий аспект главных показателей в текущих знаках. ')+ 'По этому нельзя достоверно установить, что люди делают или чувствуют сейчас.'
+        return original
+    return original
+
 def plain_language_answer(question, topic, horizon, ruler_a, ruler_b, future_main, moon_voc, reception_data=None):
     """A cautious, short, question-facing explanation for a non-astrologer.
 
@@ -572,7 +673,7 @@ def calculate(payload):
         except (TypeError,ValueError):raise ValueError('Выберите дом вопроса от 2 до 12.')
         if not 2<=target_house_manual<=12: raise ValueError('Дом вопроса должен быть от 2 до 12.')
     else:target_house_manual=None
-    resolution=resolve_question(question,requested_topic,focus_choice,target_house_manual,payload.get('people_context'))
+    resolution=resolve_question(question,requested_topic,focus_choice,target_house_manual,payload.get('people_context'),payload.get('manual_focus_text'))
     topic=resolution['topic']
     city_id = payload.get('city', 'minsk')
     if city_id == 'other':
@@ -726,6 +827,8 @@ def calculate(payload):
         simple['label']='Есть обнадёживающий признак, но вывод предварительный'
         simple['summary']='Главные показатели сближаются, но у этого вида вопроса могут быть дополнительные правила, не учтённые автоматически.'
 
+    simple=outcome_based_answer(question,kind,resolution,simple,future_main,horizon,reception_data,obstruct)
+
     return {'question':question,'topic':resolution['label'],
       'scope':f"{resolution.get('house_explanation') or ('Сфера: '+resolution['label'])}. {resolution['method']}. Участник: дом {actor_house}; предмет: дом {target_house}.", 
       'resolution':resolution,'question_kind':kind,'horizon_source':horizon_source,'actor_house':actor_house,
@@ -738,5 +841,5 @@ def calculate(payload):
       'horizon_days':horizon,'main_aspect':major_aspect,'future_main_aspect':future_main,'moon_aspect':moon_aspect, 'moon_void_of_course':moon_voc,'moon_next':future_moon[:3], 'mutual_reception':mutual,'receptions':reception,'reception_analysis':reception_data,'all_receptions':all_receptions,'obstruction_candidates':obstruct,'light_mediators':mediators,
       'warnings':notes,'verdict':verdict,'grade':grade,'evidence':evidence,
       'simple_answer':simple,
-      'version':'0.6.0 (тестовая версия)', 'ephemeris':'Swiss Ephemeris / Moshier',
+      'version':'0.7.0 (тестовая версия)', 'ephemeris':'Swiss Ephemeris / Moshier',
       'disclaimer':'Астрологическая интерпретация носит символический характер и не является доказательством будущих событий или чувств других людей.'}

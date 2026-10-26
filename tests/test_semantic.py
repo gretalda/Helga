@@ -31,7 +31,7 @@ def test_no_silent_wrong_house():
 def test_other_requires_house():
     r=post({**BASE,'focus_choice':'other'})
     assert r.status_code==422
-    r=post({**BASE,'focus_choice':'other','target_house':9})
+    r=post({**BASE,'focus_choice':'other','target_house':9,'manual_focus_text':'спор с бывшим соседом'})
     assert r.status_code==200
     assert r.json()['significators']['house']==9
 
@@ -40,7 +40,7 @@ def test_derived_house_for_relationship_of_ex_and_new_partner():
     assert r['actor_house']==7
     assert r['significators']['house']==11
     assert r['question_kind']=='status'
-    assert 'Что показывает карта' in r['simple_answer']['label']
+    assert r['simple_answer']['label'] in ('Есть признаки взаимодействия сторон','Текущее состояние связи неясно')
 
 def test_timing_and_direction_are_interpreted_not_refused():
     r=calculate({**BASE,'question':'Когда мой муж приедет?'})

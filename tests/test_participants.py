@@ -48,7 +48,7 @@ def test_initial_name_is_supported():
 
 def test_manual_first_house_for_other():
     q='Наташа и Сергей помирятся?'
-    r=calculate({**BASE,'question':q,'people_context':{'first_role':'other','first_house':9,'relation_to_first':'spouse'}})
+    r=calculate({**BASE,'question':q,'people_context':{'first_role':'other','first_role_text':'дальняя родственница','first_house':9,'relation_to_first':'spouse'}})
     assert (r['actor_house'],r['significators']['house'])==(9,3)
 
 def test_api_parse_not_requiring_horary_form():

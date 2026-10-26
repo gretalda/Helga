@@ -1,5 +1,7 @@
 from pathlib import Path
 from fastapi import FastAPI, HTTPException
+from typing import Literal
+import astro_portal as portal
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
@@ -7,7 +9,7 @@ from horary import CITIES, TOPICS, HOUSE_MEANINGS, FOCUS_CHOICES, ClarificationR
 
 from question_context import infer_context, ROLE_OPTIONS, RELATION_OPTIONS
 
-app=FastAPI(title='АстроЛично — Хорар', version='0.7.0')
+app=FastAPI(title='АстроЛично — персональная астрология', version='1.0.0')
 DIR=Path(__file__).parent
 app.mount('/static',StaticFiles(directory=DIR/'static'),name='static')
 
@@ -29,6 +31,10 @@ class HoraryRequest(BaseModel):
 
 @app.get('/')
 def homepage():
+    return FileResponse(DIR/'static'/'portal.html')
+
+@app.get('/horary')
+def horary_page():
     return FileResponse(DIR/'static'/'index.html')
 
 @app.get('/api/config')
@@ -37,7 +43,7 @@ def config():
 
 @app.get('/api/health')
 def health():
-    return {'ok':True,'version':'0.7.0'}
+    return {'ok':True,'version':'1.0.0'}
 
 class AnalyzeRequest(BaseModel):
     question:str=Field(max_length=500)
@@ -56,3 +62,39 @@ def chart(body:HoraryRequest):
         raise HTTPException(status_code=422,detail={'message':str(err),'needs_clarification':True}) from err
     except ValueError as err:
         raise HTTPException(status_code=422,detail=str(err)) from err
+
+
+class AstroRequest(BaseModel):
+    mode:Literal['natal','transits','day','period','solar','lunar','compatibility','progression','direction','sign']
+    profile:dict
+    second_profile:dict|None=None
+    date:str|None=None
+    end_date:str|None=None
+    solar_year:int|None=None
+
+@app.get('/api/astro/config')
+def astro_config():
+    return {'version':portal.VERSION,'cities':CITIES,'modes':['natal','transits','day','period','solar','lunar','compatibility','progression','direction','sign']}
+
+@app.post('/api/astro/report')
+def astro_report(body:AstroRequest):
+    try:
+        m=body.mode
+        if m=='natal':return portal.natal(body.profile)
+        if m=='sign':return portal.sign_profile(body.profile)
+        if m in ('transits','day'):return portal.transit(body.profile,body.date, 'day' if m=='day' else 'transit')
+        if m=='period':return portal.period(body.profile,body.date,body.end_date)
+        if m=='solar':return portal.return_report(body.profile,body.date,'Солнце',body.solar_year)
+        if m=='lunar':return portal.return_report(body.profile,body.date,'Луна')
+        if m=='compatibility':
+            if not body.second_profile:raise ValueError('Добавьте дату рождения второго человека.')
+            return portal.compatibility(body.profile,body.second_profile)
+        if m in ('progression','direction'):return portal.progressions(body.profile,body.date,m)
+        raise ValueError('Неизвестный раздел.')
+    except (ValueError,KeyError,OverflowError,ArithmeticError) as exc:
+        raise HTTPException(status_code=422,detail=str(exc)) from exc
+
+@app.get('/api/astro/facts')
+def astro_facts(date:str,city:str='minsk'):
+    try:return portal.astro_facts(date,city)
+    except ValueError as exc:raise HTTPException(status_code=422,detail=str(exc)) from exc

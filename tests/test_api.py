@@ -16,7 +16,7 @@ def run_request(method, url, json=None):
     return asyncio.run(invoke())
 
 def test_homepage_served():
-    result = run_request('GET', '/')
+    result = run_request('GET', '/horary')
     assert result.status_code == 200
     assert 'id="calculate"' in result.text
     assert 'id="target_house"' in result.text
@@ -28,7 +28,7 @@ def test_config_and_health():
     assert config.status_code == 200
     assert len(config.json()['houses']) == 12
     assert 'minsk' in config.json()['cities']
-    assert run_request('GET', '/api/health').json()['version'] == '0.7.0'
+    assert run_request('GET', '/api/health').json()['version'] == '1.0.0'
 
 def test_calculate_and_horizon():
     resp = run_request('POST', '/api/horary', json=BASE)
@@ -68,7 +68,7 @@ def test_simple_answer_api_and_light_layout():
     data=r.json()
     assert data['simple_answer']['summary']
     assert data['simple_answer']['label']
-    page=run_request('GET','/').text
+    page=run_request('GET','/horary').text
     assert 'id="simple-label"' in page
     assert 'id="expert"' in page
     assert '--bg:#f7f7f4' in page

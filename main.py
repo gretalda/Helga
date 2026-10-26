@@ -3,9 +3,11 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
-from horary import CITIES, TOPICS, HOUSE_MEANINGS, FOCUS_CHOICES, ClarificationRequired, calculate
+from horary import CITIES, TOPICS, HOUSE_MEANINGS, FOCUS_CHOICES, ClarificationRequired, ParticipantContextRequired, calculate
 
-app=FastAPI(title='АстроЛично — Хорар', version='0.5.1')
+from question_context import infer_context, ROLE_OPTIONS, RELATION_OPTIONS
+
+app=FastAPI(title='АстроЛично — Хорар', version='0.6.0')
 DIR=Path(__file__).parent
 app.mount('/static',StaticFiles(directory=DIR/'static'),name='static')
 
@@ -21,6 +23,7 @@ class HoraryRequest(BaseModel):
     tz:str|None=None
     fold:int=0
     target_house:int|None=None
+    people_context:dict|None=None
     horizon_days:int|None=None
 
 @app.get('/')
@@ -29,16 +32,25 @@ def homepage():
 
 @app.get('/api/config')
 def config():
-    return {'cities':CITIES,'topics':TOPICS,'houses':HOUSE_MEANINGS,'focus_choices':FOCUS_CHOICES}
+    return {'cities':CITIES,'topics':TOPICS,'houses':HOUSE_MEANINGS,'focus_choices':FOCUS_CHOICES,'role_options':ROLE_OPTIONS,'relation_options':RELATION_OPTIONS}
 
 @app.get('/api/health')
 def health():
-    return {'ok':True,'version':'0.5.1'}
+    return {'ok':True,'version':'0.6.0'}
+
+class AnalyzeRequest(BaseModel):
+    question:str=Field(max_length=500)
+
+@app.post('/api/interpret')
+def interpret(body:AnalyzeRequest):
+    return infer_context(body.question)
 
 @app.post('/api/horary')
 def chart(body:HoraryRequest):
     try:
         return calculate(body.model_dump())
+    except ParticipantContextRequired as err:
+        raise HTTPException(status_code=422, detail={'message':str(err),'needs_participants':True,'detected':err.detected}) from err
     except ClarificationRequired as err:
         raise HTTPException(status_code=422,detail={'message':str(err),'needs_clarification':True}) from err
     except ValueError as err:

@@ -9,6 +9,7 @@ import re
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 import math
 import swisseph as swe
+from question_context import infer_context, resolve_two_people, ROLE_OPTIONS, RELATION_OPTIONS
 
 SIGNS = ['Овен','Телец','Близнецы','Рак','Лев','Дева','Весы','Скорпион','Стрелец','Козерог','Водолей','Рыбы']
 SIGN_GLYPHS = ['♈','♉','♊','♋','♌','♍','♎','♏','♐','♑','♒','♓']
@@ -74,17 +75,29 @@ FOCUS_CHOICES = {
 class ClarificationRequired(ValueError):
     pass
 
+class ParticipantContextRequired(ClarificationRequired):
+    def __init__(self, message, detected):
+        super().__init__(message)
+        self.detected = detected
+
 
 def question_kind(question):
     q=question.strip().lower().lstrip('«"')
     if re.match(r'^(когда|через сколько|в какой (день|месяц|год|срок))\b',q): return 'timing'
+    if re.search(r'^как (?:будут|станут|дальше будут|будет)\s+(?:складываться|развиваться|продвигаться|идти)|^(?:каковы|какие) перспективы|^что (?:жд[её]т|будет с) отношени', q): return 'direction'
     if re.search(r'^(что (сейчас )?происходит|что между|какие (сейчас )?отношения|как (сейчас )?(идут|складываются|развиваются)|в каком (состоянии|моменте)|что (он|она) чувствует|каково отношение)',q): return 'status'
     if re.search(r'^(к чему|куда (идут|ведут)|чем (закончится|завершится)|как будет развиваться|каково будущее|что будет дальше|как (все|всё) закончится|как долго продлится)',q): return 'direction'
     if re.search(r'^(почему|зачем|кто |где |с кем |кого |какая |какое |какие |как |что |сколько )',q): return 'open'
     return 'yesno'
 
 
-def resolve_question(question, requested_topic=None, focus_choice=None, manual_house=None):
+def resolve_question(question, requested_topic=None, focus_choice=None, manual_house=None, people_context=None):
+    detected=infer_context(question)
+    if detected["mode"] == "two_people":
+        try:
+            return resolve_two_people(question,people_context,manual_house)
+        except ValueError as err:
+            raise ParticipantContextRequired(str(err),detected) from err
     q=question.lower().replace('ё','е')
     if focus_choice:
         if focus_choice not in FOCUS_CHOICES: raise ValueError('Неизвестный тип участника вопроса.')
@@ -559,7 +572,7 @@ def calculate(payload):
         except (TypeError,ValueError):raise ValueError('Выберите дом вопроса от 2 до 12.')
         if not 2<=target_house_manual<=12: raise ValueError('Дом вопроса должен быть от 2 до 12.')
     else:target_house_manual=None
-    resolution=resolve_question(question,requested_topic,focus_choice,target_house_manual)
+    resolution=resolve_question(question,requested_topic,focus_choice,target_house_manual,payload.get('people_context'))
     topic=resolution['topic']
     city_id = payload.get('city', 'minsk')
     if city_id == 'other':
@@ -641,9 +654,12 @@ def calculate(payload):
     if mediators['translation']:notes.append('Есть кандидат на перевод света Луной (не окончательное заключение).')
     if mediators['collection']:notes.append('Есть кандидаты на собирание света (требуют дополнительных проверок).')
     if resolution.get('caution'): notes.append(resolution['caution'])
+    if resolution.get('house_explanation'): evidence_house = resolution['house_explanation']
+    else: evidence_house = None
     if mutual: notes.append('Есть взаимная рецепция по традиционным достоинствам между управителями выбранных домов.')
     if moon_voc: notes.append('По расчёту ближайших точных мажорных аспектов Луна без курса до выхода из знака. Традиции определения Луны без курса различаются.')
     evidence=[]
+    if evidence_house: evidence.append('Обоснование домов: '+evidence_house)
     grade='neutral'
     verdict='Нет достаточных оснований для однозначного ответа'
     if major_aspect:
@@ -711,7 +727,7 @@ def calculate(payload):
         simple['summary']='Главные показатели сближаются, но у этого вида вопроса могут быть дополнительные правила, не учтённые автоматически.'
 
     return {'question':question,'topic':resolution['label'],
-      'scope':f"Сфера: {resolution['label']}. {resolution['method']}. Участник: дом {actor_house}; предмет: дом {target_house} — {HOUSE_MEANINGS[target_house]}.", 
+      'scope':f"{resolution.get('house_explanation') or ('Сфера: '+resolution['label'])}. {resolution['method']}. Участник: дом {actor_house}; предмет: дом {target_house}.", 
       'resolution':resolution,'question_kind':kind,'horizon_source':horizon_source,'actor_house':actor_house,
       'city':city_name,'local_time':local.isoformat(timespec='minutes'), 'utc_time':utc.isoformat(timespec='minutes'),
       'timezone':tz_name,'latitude':lat,'longitude':lon,'jd':round(jd,7),
@@ -722,5 +738,5 @@ def calculate(payload):
       'horizon_days':horizon,'main_aspect':major_aspect,'future_main_aspect':future_main,'moon_aspect':moon_aspect, 'moon_void_of_course':moon_voc,'moon_next':future_moon[:3], 'mutual_reception':mutual,'receptions':reception,'reception_analysis':reception_data,'all_receptions':all_receptions,'obstruction_candidates':obstruct,'light_mediators':mediators,
       'warnings':notes,'verdict':verdict,'grade':grade,'evidence':evidence,
       'simple_answer':simple,
-      'version':'0.5.1 (тестовая версия)', 'ephemeris':'Swiss Ephemeris / Moshier',
+      'version':'0.6.0 (тестовая версия)', 'ephemeris':'Swiss Ephemeris / Moshier',
       'disclaimer':'Астрологическая интерпретация носит символический характер и не является доказательством будущих событий или чувств других людей.'}

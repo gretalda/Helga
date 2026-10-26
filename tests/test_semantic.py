@@ -36,7 +36,7 @@ def test_other_requires_house():
     assert r.json()['significators']['house']==9
 
 def test_derived_house_for_relationship_of_ex_and_new_partner():
-    r=calculate({**BASE,'question':'Что происходит в отношениях бывшего мужа с его девушкой?'})
+    r=calculate({**BASE,'question':'Что происходит в отношениях моего бывшего мужа с его девушкой?'})
     assert r['actor_house']==7
     assert r['significators']['house']==11
     assert r['question_kind']=='status'

@@ -155,6 +155,72 @@ def essential_dignity(planet, zodiac):
     if EXALT.get(planet)==SIGNS[opposite]:descriptions.append('в падении')
     return descriptions or ['без главных эссенциальных достоинств по знаку']
 
+def plain_language_answer(question, topic, horizon, ruler_a, ruler_b, future_main, moon_voc):
+    """A cautious, short, question-facing explanation for a non-astrologer.
+
+    Interpret *only* the limited rules this prototype has actually calculated;
+    never infer motives, feelings, certainty or a calendar date for events.
+    """
+    q = question.strip().lower().lstrip('«"')
+    open_starts = ('когда ', 'где ', 'кто ', 'кого ', 'кому ', 'с кем ',
+                   'почему ', 'зачем ', 'сколько ', 'какой ', 'какая ',
+                   'какое ', 'какие ', 'как ', 'что ', 'чем ')
+    open_ended = q.startswith(open_starts)
+    focus = {
+        'contact': 'общении', 'relationship': 'отношениях', 'work': 'работе',
+        'money': 'деньгах', 'property': 'недвижимости или имуществе',
+        'children': 'детях', 'travel': 'поездке',
+    }.get(topic, 'ситуации')
+    suffix = (f'в пределах указанного срока ({horizon} дн.)' if horizon is not None
+              else 'без определённого срока')
+    prep = 'об' if focus.startswith(('о','а','э','и','у','е')) else 'о'
+    caution = ('Это предварительная трактовка хорарной карты, а не подтверждённый факт '
+               'или гарантия будущего события.')
+    if open_ended:
+        return {'kind':'unclear', 'label':'Нужна конкретизация вопроса',
+            'summary': ('На вопрос, начинающийся с «когда», «почему», «что» или «с кем», '
+                        'нельзя честно ответить просто «да» или «нет». ' 
+                        'Для точного разбора здесь нужен отдельный сценарий трактовки.'),
+            'reasons':['Карта построена, но автоматическая оценка пока предназначена для вопросов с ответом «да/нет».',
+                       'Можно уточнить один проверяемый вопрос и, если важно, обозначить срок.'],
+            'note':caution}
+    if ruler_a == ruler_b:
+        return {'kind':'unclear','label':'Пока нельзя ответить однозначно',
+            'summary':'Один и тот же показатель описывает обе стороны вопроса. По нему одному нельзя определить исход.',
+            'reasons':['Управители двух выбранных домов совпали.',
+                       'Для осмысленного ответа нужно дополнительно исследовать Луну, дома и другие связи.'],
+            'note':caution}
+    if future_main and (horizon is None or future_main['days'] <= horizon):
+        aspect=future_main['name'].lower()
+        if future_main['angle'] in (0, 60, 120):
+            return {'kind':'positive','label':'Скорее да',
+                'summary':f'В вопросе об {focus} есть предварительный показатель движения к результату {suffix}. Но уверенно обещать событие по одной связи планет нельзя.',
+                'reasons':[f'Планеты, обозначающие вас и предмет вопроса, идут к точному аспекту ({aspect}).',
+                           'В этой версии ещё не проверены все обстоятельства, которые могут помешать результату.'],
+                'note':caution}
+        return {'kind':'mixed','label':'Возможно, но с трудностями',
+            'summary':f'В вопросе об {focus} просматривается развитие {suffix}, однако карта указывает на напряжение. Это не равнозначно однозначному «да».',
+            'reasons':[f'Между основными планетами ожидается напряжённый аспект ({aspect}).',
+                       'Для вывода об успехе нужно проверить рецепции, препятствия и остальные показатели карты.'],
+            'note':caution}
+    if horizon is not None:
+        if future_main:
+            why='Связь между главными планетами возникает позже выбранного срока, а не внутри него.'
+        else:
+            why='В указанный срок расчёт не обнаружил прямого точного аспекта главных планет до выхода из знака.'
+        return {'kind':'caution','label':'Скорее нет в указанный срок',
+            'summary':f'Для вопроса {prep} {focus} карта пока не показывает ясного прямого подтверждения результата в ближайшие {horizon} дн. Это не окончательный отказ: другие правила хорара здесь ещё не оценены.',
+            'reasons':[why,'Отсутствие прямой связи само по себе не доказывает, что событие невозможно.'],
+            'note':caution}
+    reasons=['До выхода планет из своих знаков не найден прямой точный аспект между главными управителями.',
+             'Чтобы судить о возможности события, нужно проверить дополнительные правила хорара.']
+    if moon_voc:
+        reasons[1]='Луна также не образует новых основных точных аспектов до выхода из знака; требуются дополнительные проверки.'
+    return {'kind':'unclear','label':'Пока нет ясного «да»',
+        'summary':f'В вопросе об {focus} явного прямого подтверждения результата пока не видно. Без срока и более полного разбора нельзя уверенно сказать «нет».',
+        'reasons':reasons,'note':caution}
+
+
 def calculate(payload):
     question = str(payload.get('question','')).strip()
     if not 5 <= len(question) <= 500:
@@ -285,5 +351,6 @@ def calculate(payload):
          'self_pos':planets[ruler_a]['degree'],'subject_pos':planets[ruler_b]['degree']},
       'horizon_days':horizon,'main_aspect':major_aspect,'future_main_aspect':future_main,'moon_aspect':moon_aspect, 'moon_void_of_course':moon_voc,'moon_next':future_moon[:3], 'mutual_reception':mutual,
       'warnings':notes,'verdict':verdict,'grade':grade,'evidence':evidence,
-      'version':'0.2.1 (тестовая версия)', 'ephemeris':'Swiss Ephemeris / Moshier',
+      'simple_answer':plain_language_answer(question,topic,horizon,ruler_a,ruler_b,future_main,moon_voc),
+      'version':'0.3.0 (тестовая версия)', 'ephemeris':'Swiss Ephemeris / Moshier',
       'disclaimer':'Астрологическая интерпретация носит символический характер и не является доказательством будущих событий или чувств других людей.'}

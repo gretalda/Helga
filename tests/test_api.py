@@ -28,7 +28,7 @@ def test_config_and_health():
     assert config.status_code == 200
     assert len(config.json()['houses']) == 12
     assert 'minsk' in config.json()['cities']
-    assert run_request('GET', '/api/health').json()['version'] == '0.2.1'
+    assert run_request('GET', '/api/health').json()['version'] == '0.3.0'
 
 def test_calculate_and_horizon():
     resp = run_request('POST', '/api/horary', json=BASE)
@@ -60,3 +60,15 @@ def test_errors_are_user_friendly():
         r = run_request('POST','/api/horary',json=data)
         assert r.status_code == 422, (data,r.text)
         assert expected.lower() in r.json()['detail'].lower()
+
+
+def test_simple_answer_api_and_light_layout():
+    r=run_request('POST','/api/horary',json=BASE)
+    assert r.status_code == 200
+    data=r.json()
+    assert data['simple_answer']['summary']
+    assert data['simple_answer']['label']
+    page=run_request('GET','/').text
+    assert 'id="simple-label"' in page
+    assert 'id="expert"' in page
+    assert '--bg:#f7f7f4' in page

@@ -53,3 +53,34 @@ def test_future_perfection_is_exact_astronomically():
         lon_b=swe.calc_ut(jd,b,swe.FLG_MOSEPH)[0][0]
         from horary import angular_distance
         assert abs(angular_distance(lon_a,lon_b)-aspect['angle']) < 0.03
+
+
+def test_simple_language_response_for_real_calculation():
+    r=calculate({**BASE,'horizon_days':14})
+    plain=r['simple_answer']
+    assert plain['label']
+    assert plain['summary']
+    assert len(plain['reasons']) >= 2
+    assert 'гаранти' in plain['note'] or 'подтвержд' in plain['note']
+    assert plain['kind'] in ('positive','caution','mixed','unclear')
+
+
+def test_simple_language_open_question_does_not_fake_yes_no():
+    r=calculate({**BASE,'question':'Когда он позвонит мне?'})
+    assert r['simple_answer']['kind']=='unclear'
+    assert 'конкретизац' in r['simple_answer']['label'].lower()
+
+
+def test_simple_language_direct_significator_aspects():
+    from horary import plain_language_answer
+    d={'name':'Трин','angle':120,'days':3}
+    good=plain_language_answer('Позвонит ли он?','contact',7,'Марс','Венера',d,False)
+    assert good['label']=='Скорее да'
+    tense=plain_language_answer('Позвонит ли он?','contact',7,'Марс','Венера',{'name':'Квадрат','angle':90,'days':3},False)
+    assert tense['kind']=='mixed'
+    late=plain_language_answer('Позвонит ли он?','contact',7,'Марс','Венера',{'name':'Трин','angle':120,'days':12},False)
+    assert 'указанный срок' in late['label']
+    unknown=plain_language_answer('Позвонит ли он?','contact',None,'Марс','Венера',None,False)
+    assert unknown['kind']=='unclear'
+    same=plain_language_answer('Будет ли работа?','work',7,'Марс','Марс',d,False)
+    assert same['kind']=='unclear'

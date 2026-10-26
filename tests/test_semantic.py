@@ -72,3 +72,9 @@ def test_html_no_category_buttons_and_clarification_available():
     assert 'id="topics"' not in html
     assert 'id="focus_choice"' in html
     assert 'id="r-context"' in html
+
+
+def test_verbal_genitive_duration_from_question():
+    assert time_hint('Позвонит ли он в течение двух недель?',datetime(2026,10,26),None)[0]==14
+    assert time_hint('В течение трех месяцев',datetime(2026,10,26),None)[0]==90
+    assert time_hint('За пять дней',datetime(2026,10,26),None)[0]==5

@@ -144,8 +144,8 @@ def resolve_question(question, requested_topic=None, focus_choice=None, manual_h
 def time_hint(question, local_dt, explicit):
     if explicit is not None:return explicit,'вручную'
     q=question.lower().replace('ё','е')
-    words={'одну':1,'один':1,'одна':1,'две':2,'два':2,'три':3,'четыре':4,'пять':5,'шесть':6,'семь':7,'восемь':8,'девять':9,'десять':10}
-    verbal=re.search(r'в\s+(?:ближайш\w+\s+)?('+ '|'.join(words) + r')\s+(недел\w*|дн\w*|месяц\w*)',q)
+    words={'одну':1,'один':1,'одна':1,'две':2,'два':2,'три':3,'четыре':4,'пять':5,'шесть':6,'семь':7,'восемь':8,'девять':9,'десять':10,'двух':2,'трех':3,'четырех':4,'пяти':5,'шести':6,'семи':7,'восьми':8,'девяти':9,'десяти':10,'одной':1,'одного':1}
+    verbal=re.search(r'(?:\bв\s+(?:(?:ближайш|следующ)\w+\s+|течение\s+)?|\bза\s+)('+ '|'.join(words) + r')\s+(недел\w*|дн\w*|месяц\w*)',q)
     if verbal:
         unit=verbal.group(2);value=words[verbal.group(1)]*(7 if unit.startswith('недел') else 30 if unit.startswith('месяц') else 1)
         if 1<=value<=365:return value,'из текста вопроса (условная длина месяца — 30 дней)'
@@ -722,5 +722,5 @@ def calculate(payload):
       'horizon_days':horizon,'main_aspect':major_aspect,'future_main_aspect':future_main,'moon_aspect':moon_aspect, 'moon_void_of_course':moon_voc,'moon_next':future_moon[:3], 'mutual_reception':mutual,'receptions':reception,'reception_analysis':reception_data,'all_receptions':all_receptions,'obstruction_candidates':obstruct,'light_mediators':mediators,
       'warnings':notes,'verdict':verdict,'grade':grade,'evidence':evidence,
       'simple_answer':simple,
-      'version':'0.5.0 (тестовая версия)', 'ephemeris':'Swiss Ephemeris / Moshier',
+      'version':'0.5.1 (тестовая версия)', 'ephemeris':'Swiss Ephemeris / Moshier',
       'disclaimer':'Астрологическая интерпретация носит символический характер и не является доказательством будущих событий или чувств других людей.'}

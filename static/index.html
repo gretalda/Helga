@@ -6,6 +6,9 @@
   <meta name="theme-color" content="#f7f7f4" />
   <link rel="manifest" href="/static/manifest.json" />
   <link rel="icon" href="/static/icon-192.png" />
+  <link rel="apple-touch-icon" href="/static/icon-192.png" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="default" />
   <title>АстроЛично · Хорар</title>
   <style>
     :root{--bg:#f7f7f4;--card:#fff;--card2:#f7f9f9;--ink:#243044;--muted:#617082;--accent:#896640;--border:#dce2e3;--rose:#a35a52;--green:#28735e;--blue:#3d637f}
@@ -27,6 +30,7 @@
     .table-wrap{overflow-x:auto}table{border-collapse:collapse;width:100%;font-size:13px}td,th{text-align:left;padding:10px 6px;border-bottom:1px solid #e1e6e6;white-space:nowrap}th{font-size:11px;color:var(--muted);font-weight:650}td:last-child{text-align:right}.secondary{background:#fff;border:1px solid #cfdbdc;border-radius:9px;color:#345464;padding:8px 12px;font-size:12px}.secondary:hover{background:#f1f6f5}.tools{display:flex;gap:8px;flex-wrap:wrap;margin-top:18px}
     .smallprint{margin-top:20px;padding:12px 0;border-top:1px solid #e1e6e6;color:#6f7d8a;font-size:11px;line-height:1.7}.error{background:#fff2f2;border:1px solid #e1baba;border-radius:10px;padding:12px;color:#922d35;font-size:13px;margin-top:15px}.archive{margin-top:25px}.archive button{display:block;width:100%;text-align:left;border:0;border-bottom:1px solid #e3e7e9;padding:10px 1px;background:transparent;color:#485c6d}.archive button:hover{color:var(--accent)}.archive .date{font-size:11px;color:#82909e}footer{margin-top:29px;color:#707d87;font-size:12px;text-align:center}footer a{color:#527078}
     .advanced{border:1px solid var(--border);border-radius:11px;padding:12px;margin-top:19px;background:#f9fbfb}.advanced summary{cursor:pointer;color:#365d69;font-size:13px}.advanced label{margin-top:12px}.panel-head label{margin:18px 0 8px}.panel-head button{margin-top:6px;white-space:nowrap}#success{color:#2c795d}
+    .install-strip{display:flex;gap:12px;align-items:center;justify-content:space-between;padding:14px 16px;margin:16px 0 5px;border:1px solid var(--border);border-radius:13px;background:#fff}.install-strip p{margin:0;font-size:13px;color:var(--muted)}.install-strip button{white-space:nowrap}.install-strip[hidden]{display:none!important}@media(max-width:520px){.install-strip{align-items:stretch;flex-direction:column}}
     @media(max-width:830px){.layout{grid-template-columns:minmax(0,1fr)}.shell{padding:19px 15px 42px}.panel{padding:19px}header{padding-top:31px}h1{font-size:42px}.state{min-height:230px}.top{padding-bottom:20px}}@media(max-width:480px){.panel{padding:17px}header{padding:28px 0 20px}.top{padding-bottom:17px}.brand{font-size:18px}.prototype{font-size:9px;padding:5px 8px}.shell{padding:18px 13px 35px}.significators{grid-template-columns:1fr}.human-answer{padding:17px}.answer-summary{font-size:15px}}@media(max-width:350px){.smallgrid,.topic,.significators{grid-template-columns:1fr}}
     @media print{body{background:#fff;color:#222}.panel{box-shadow:none;border:0;background:white}.top,header,.input-pane,.tools,footer,.result-head button{display:none!important}.layout{display:block}.shell{padding:0}.output-pane{padding:0}.human-answer{border:1px solid #ddd}.tech-details{display:none}.caption,.muted,.hint,.smallprint{color:#444}}
   </style>
@@ -35,6 +39,7 @@
 <div class="shell">
   <div class="top"><div class="brand">✦ Астро<span>Лично</span></div><div class="prototype">Хорар · версия 0.6.0 <span id="server-state" aria-live="polite">· проверка сервера</span></div></div>
   <header><h1>Ваш вопрос.<br /><em>Его карта.</em></h1><p class="intro">Задайте конкретный вопрос и получите понятный предварительный ответ. Ниже — карта, планеты и объяснение для тех, кто хочет разобраться подробнее.</p></header>
+  <aside class="install-strip" id="install-strip" hidden aria-live="polite"><div><strong>АстроЛично на телефоне</strong><p id="install-help">Установите приложение на главный экран, чтобы открывать его как обычное приложение.</p></div><button class="secondary" id="install-button" type="button">Установить</button></aside>
   <div class="layout">
     <section class="panel input-pane">
       <h2>Сформулируйте вопрос</h2>
@@ -217,6 +222,20 @@ $('export').addEventListener('click',()=>{if(!current)return;const a=document.cr
 $('copy').addEventListener('click',async()=>{if(!current)return;const d=current;const txt=[`ХОРАР: ${d.question}`,`${d.city}, ${d.local_time} · ${d.timezone}`,`Вы: ${d.significators.self}; предмет: ${d.significators.subject}; дом ${d.significators.house}`,`Простой ответ: ${d.simple_answer?.label||d.verdict}`,(d.simple_answer?.summary||''),...(d.simple_answer?.reasons||[]).map(x=>'Почему: '+x),`Астрологические показатели: ${d.verdict}`,...d.evidence.map(x=>'• '+x),...d.warnings.map(x=>'Примечание: '+x),d.disclaimer].join('\n');try{await navigator.clipboard.writeText(txt);$('copy').textContent='Скопировано ✓';setTimeout(()=>$('copy').textContent='Скопировать разбор',1600)}catch(e){$('error').textContent='Копирование недоступно в этом браузере. Используйте экспорт JSON.';$('error').classList.remove('hidden')}});
 $('svg').addEventListener('click',()=>{if(!current)return;let svg=$('wheel').querySelector('svg').cloneNode(true);svg.setAttribute('xmlns','http://www.w3.org/2000/svg');const file=new Blob([new XMLSerializer().serializeToString(svg)],{type:'image/svg+xml;charset=utf-8'});const a=document.createElement('a');a.href=URL.createObjectURL(file);a.download='astrolichno-horary-chart.svg';a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000)});
 $('print').addEventListener('click',()=>window.print());fetch('/api/health').then(r=>{if(!r.ok)throw Error();return r.json()}).then(()=>{$('server-state').textContent='· сервер доступен'}).catch(()=>{$('server-state').textContent='· сервер недоступен'});refreshHistory();if('serviceWorker' in navigator && location.protocol==='https:')navigator.serviceWorker.register('/static/service-worker.js').catch(()=>{});
+let deferredInstallPrompt=null;
+const installStrip=$('install-strip'),installButton=$('install-button'),installHelp=$('install-help');
+const isInstalled=()=>window.matchMedia('(display-mode: standalone)').matches||navigator.standalone===true;
+const isIos=()=>/iPad|iPhone|iPod/.test(navigator.userAgent);
+function updateInstall(){
+  if(isInstalled()){installStrip.hidden=true;return;}
+  if(deferredInstallPrompt){installStrip.hidden=false;installButton.hidden=false;installButton.textContent='Установить';installHelp.textContent='Откройте приложение на главном экране без вкладки браузера.';return;}
+  if(isIos()){installStrip.hidden=false;installButton.hidden=true;installHelp.textContent='В Safari нажмите «Поделиться» → «На экран Домой». Для расчёта карты нужен интернет.';return;}
+  installStrip.hidden=false;installButton.hidden=true;installHelp.textContent='В меню браузера выберите «Установить приложение» или «Добавить на главный экран». Для расчёта нужен интернет.';
+}
+window.addEventListener('beforeinstallprompt',event=>{event.preventDefault();deferredInstallPrompt=event;updateInstall()});
+window.addEventListener('appinstalled',()=>{deferredInstallPrompt=null;updateInstall()});
+installButton.addEventListener('click',async()=>{if(!deferredInstallPrompt)return;const prompt=deferredInstallPrompt;deferredInstallPrompt=null;await prompt.prompt();await prompt.userChoice;updateInstall()});
+updateInstall();
 </script>
 </body>
 </html>

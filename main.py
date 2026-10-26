@@ -8,6 +8,15 @@ from horary import CITIES, TOPICS, HOUSE_MEANINGS, FOCUS_CHOICES, ClarificationR
 from question_context import infer_context, ROLE_OPTIONS, RELATION_OPTIONS
 
 app=FastAPI(title='АстроЛично — Хорар', version='0.6.0')
+@app.middleware("http")
+async def protect_personal_questions(request, call_next):
+    response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    if request.url.path.startswith("/api/") or request.url.path == "/":
+        response.headers["Cache-Control"] = "no-store"
+    return response
+
 DIR=Path(__file__).parent
 app.mount('/static',StaticFiles(directory=DIR/'static'),name='static')
 

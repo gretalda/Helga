@@ -33,6 +33,11 @@ class HoraryRequest(BaseModel):
 def homepage():
     return FileResponse(DIR/'static'/'portal.html')
 
+@app.get('/service-worker.js', include_in_schema=False)
+def pwa_service_worker():
+    # Serve from root so the SW may control the whole app, not just /static/.
+    return FileResponse(DIR/'static'/'service-worker.js', media_type='application/javascript', headers={'Cache-Control':'no-cache'})
+
 @app.get('/horary')
 def horary_page():
     return FileResponse(DIR/'static'/'index.html')

@@ -17,6 +17,26 @@ class PortalTests(unittest.TestCase):
         self.assertTrue(body['chart']['planets'])
         self.assertTrue(body.get('lead'))
         return body
+    def test_birth_checkbox_id_matches_javascript(self):
+        page=CLIENT.get('/').text
+        self.assertIn('id="time-known"',page)
+        self.assertIn("prefix==='birth'?'time-known':prefix+'-known'",page)
+        self.assertIn('id="other-known"',page)
+
+    def test_pwa_root_scope_and_manifest(self):
+        sw=CLIENT.get('/service-worker.js')
+        self.assertEqual(sw.status_code,200)
+        self.assertIn('javascript',sw.headers['content-type'])
+        self.assertIn('install',sw.text)
+        manifest=CLIENT.get('/static/manifest.json').json()
+        self.assertEqual(manifest['start_url'],'/')
+        self.assertEqual(manifest['scope'],'/')
+        self.assertEqual(manifest['display'],'standalone')
+        self.assertEqual(CLIENT.get('/static/icon-192.png').status_code,200)
+        self.assertEqual(CLIENT.get('/static/icon-512.png').status_code,200)
+        self.assertIn("register('/service-worker.js'",CLIENT.get('/').text)
+        self.assertIn("register('/service-worker.js'",CLIENT.get('/horary').text)
+
     def test_home_portal_and_horary_retained(self):
         self.assertIn('Твоя карта',CLIENT.get('/').text)
         self.assertIn('АстроЛично',CLIENT.get('/horary').text)

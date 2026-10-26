@@ -67,8 +67,8 @@ def test_simple_language_response_for_real_calculation():
 
 def test_simple_language_open_question_does_not_fake_yes_no():
     r=calculate({**BASE,'question':'Когда он позвонит мне?'})
-    assert r['simple_answer']['kind']=='unclear'
-    assert 'конкретизац' in r['simple_answer']['label'].lower()
+    assert r['question_kind']=='timing'
+    assert 'дата' in r['simple_answer']['label'].lower() or 'ориентир' in r['simple_answer']['label'].lower()
 
 
 def test_simple_language_direct_significator_aspects():

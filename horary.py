@@ -4,7 +4,8 @@ Swiss Ephemeris / pyswisseph is AGPL-3.0-or-later licensed. Before
 publicly deploying or distributing this software, comply with AGPL
 obligations or purchase the appropriate Swiss Ephemeris commercial license.
 """
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
+import re
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 import math
 import swisseph as swe
@@ -26,6 +27,7 @@ TOPICS = {
     'property': {'label':'Дом и имущество', 'house':4, 'description':'Вы — I дом, недвижимость — IV дом. Для продажи также важен покупатель (VII дом).'},
     'children': {'label':'Дети', 'house':5, 'description':'Вы — I дом, ваш ребёнок — V дом. Вопросы о поступках другого человека требуют повернутых домов.'},
     'travel': {'label':'Дальняя поездка', 'house':9, 'description':'Вы — I дом, дальняя поездка — IX дом; короткая дорога может относиться к III дому.'},
+    'other': {'label':'Другой вопрос', 'house':2,'description':'Дом выбран по смыслу конкретного вопроса, требуется проверка трактовки.'},
 }
 CITIES = {
  'minsk': {'name':'Минск', 'lat':53.9006,'lon':27.5590,'tz':'Europe/Minsk'},
@@ -48,6 +50,218 @@ CITIES = {
  'tbilisi': {'name':'Тбилиси', 'lat':41.7151,'lon':44.8271,'tz':'Asia/Tbilisi'},
  'istanbul': {'name':'Стамбул', 'lat':41.0082,'lon':28.9784,'tz':'Europe/Istanbul'},
 }
+
+# Semantic context is intentionally conservative. We never silently assign the
+# VII house to an unidentified relative or stranger.
+FOCUS_CHOICES = {
+ 'partner': {'label':'Партнёр / супруг / бывший супруг', 'topic':'relationship','house':7},
+ 'acquaintance': {'label':'Знакомый или другой человек', 'topic':'contact','house':7},
+ 'friend': {'label':'Друг / подруга', 'topic':'contact','house':11},
+ 'coworker': {'label':'Коллега / сотрудник', 'topic':'work','house':6},
+ 'boss': {'label':'Руководитель', 'topic':'work','house':10},
+ 'child': {'label':'Мой ребёнок', 'topic':'children','house':5},
+ 'work': {'label':'Моя работа / должность', 'topic':'work','house':10},
+ 'money': {'label':'Мои деньги', 'topic':'money','house':2},
+ 'property': {'label':'Дом / недвижимость', 'topic':'property','house':4},
+ 'travel': {'label':'Моя поездка', 'topic':'travel','house':9},
+ 'vehicle': {'label':'Автомобиль / личная вещь', 'topic':'other','house':2},
+ 'health': {'label':'Здоровье', 'topic':'other','house':6},
+ 'studies': {'label':'Учёба / экзамены', 'topic':'other','house':9},
+ 'documents': {'label':'Документы / письма', 'topic':'other','house':3},
+ 'other': {'label':'Другое (выбрать дом самостоятельно)', 'topic':'other','house':None},
+}
+
+class ClarificationRequired(ValueError):
+    pass
+
+
+def question_kind(question):
+    q=question.strip().lower().lstrip('«"')
+    if re.match(r'^(когда|через сколько|в какой (день|месяц|год|срок))\b',q): return 'timing'
+    if re.search(r'^(что (сейчас )?происходит|что между|какие (сейчас )?отношения|как (сейчас )?(идут|складываются|развиваются)|в каком (состоянии|моменте)|что (он|она) чувствует|каково отношение)',q): return 'status'
+    if re.search(r'^(к чему|куда (идут|ведут)|чем (закончится|завершится)|как будет развиваться|каково будущее|что будет дальше|как (все|всё) закончится|как долго продлится)',q): return 'direction'
+    if re.search(r'^(почему|зачем|кто |где |с кем |кого |какая |какое |какие |как |что |сколько )',q): return 'open'
+    return 'yesno'
+
+
+def resolve_question(question, requested_topic=None, focus_choice=None, manual_house=None):
+    q=question.lower().replace('ё','е')
+    if focus_choice:
+        if focus_choice not in FOCUS_CHOICES: raise ValueError('Неизвестный тип участника вопроса.')
+        chosen=FOCUS_CHOICES[focus_choice]
+        if focus_choice == 'other' and manual_house is None:
+            raise ClarificationRequired('Для темы «Другое» откройте расширенные настройки и выберите дом предмета вопроса.')
+        house=manual_house if manual_house is not None else chosen['house']
+        return {'topic':chosen['topic'] if chosen['topic'] in TOPICS else 'other', 'house':house,
+                'method':'уточнение пользователя', 'label':chosen['label'], 'actor_house':1,
+                'caution':'Дом выбран по уточнению пользователя; вопросы о третьих лицах требуют проверки производных домов.'}
+    if requested_topic in TOPICS:
+        return {'topic':requested_topic,'house':manual_house or TOPICS[requested_topic]['house'],
+                'method':'выбор темы (старый API)','label':TOPICS[requested_topic]['label'],'actor_house':1,
+                'caution':'Тема была передана явно; для третьих лиц проверьте производные дома.'}
+    # The most specific people and derived houses first.
+    if re.search(r'бывш\w* (муж|жен)|\b(муж|жен|супруг|супругу|супруга|партнер|любим|бойфренд)\w*',q) and re.search(r'(его|ее|не[её]|у него|у нее|с его|с ее)\s+(девушк|парн|женщин|партнер|любовниц)\w*',q):
+        return {'topic':'relationship','house':11,'actor_house':7,'method':'производные дома',
+                'label':'Отношения партнёра с его романтическим партнёром',
+                'caution':'Проверка: партнёр — VII дом, его романтический интерес — V от VII, то есть XI дом. Для брака и иных связей дома могут отличаться.'}
+    # A question about an action between two named roles must not use the
+    # querent's I-house as the actor just because the child is mentioned.
+    parent_person=re.search(r'\b(муж|жен[аы]|супруг|бывш\w* муж)\w*',q)
+    named_child=re.search(r'\b(доч|сын|ребен|дет)\w*',q)
+    if parent_person and named_child and re.search(r'\b(позвон|подар|поздрав|увид|встрет|приед|прилет|забер)\w*',q):
+        return {'topic':'children','house':5,'actor_house':7,'method':'две стороны вопроса',
+                'label':'Действия партнёра по отношению к ребёнку',
+                'caution':'Партнёр — VII дом, ребёнок спрашивающего — V дом. При другом родстве или смысле действия выбор домов необходимо проверять.'}
+    if parent_person and named_child and re.search(r'его\s+(ребен|дет|доч|сын)',q):
+        return {'topic':'children','house':11,'actor_house':7,'method':'производные дома',
+                'label':'Ребёнок партнёра (V от VII)',
+                'caution':'Ребёнок партнёра — XI дом как V от VII. Точно определить родство по короткому вопросу бывает невозможно.'}
+    rules=[
+      (r'\b(сын|доч[ькреи]|ребен|ребенк|дет[иея]|малыш)\w*','children',5,'Мой ребёнок'),
+      (r'\b(муж|жен|супруг|партнер|любим|бывш|бойфренд|девушк|парень)\w*','relationship',7,'Партнёр / бывший партнёр'),
+      (r'\b(начальник|директор|руководител|босс)\w*','work',10,'Руководитель'),
+      (r'\b(коллег|сотрудник)\w*','work',6,'Коллега'),
+      (r'\b(подруг|друг|приятел)\w*','contact',11,'Друг / подруга'),
+      (r'\b(машин|автомобил|авто|ремонт авто|транспортн\w* средст)\w*','other',2,'Автомобиль / личное имущество'),
+      (r'\b(документ|письм|уведомлен|сообщен|справк)\w*','other',3,'Документы / сообщение'),
+      (r'\b(экзамен|учеб|учеба|диплом|университет|образован)\w*','other',9,'Учёба / экзамен'),
+      (r'\b(самочувств|здоров|болезн|выздоров|врач|лечен)\w*','other',6,'Здоровье'),
+      (r'\b(зарплат|деньг|доход|прибыл|кредит|финанс|денеж|оплат|алимент)\w*','money',2,'Деньги / доход'),
+      (r'\b(работ|должност|карьер|повышен|увол|трудоустро|ваканс|собеседован)\w*','work',10,'Работа / карьера'),
+      (r'\b(квартир\w*|дом|доме|дома|недвижимост\w*|жиль\w*|переезд\w*)','property',4,'Дом / недвижимость'),
+      (r'\b(поездк|полет|путешеств|самолет|рейс|улеч|вылеч|прилет)\w*','travel',9,'Дальняя поездка'),
+    ]
+    for pattern,topic,house,label in rules:
+        if re.search(pattern,q):
+            return {'topic':topic,'house':manual_house or house,'actor_house':1,'method':'определено по тексту',
+                    'label':label,'caution':'Автоматическое распознавание может ошибаться. Если речь о другом человеке или производных домах, проверьте выбор.'}
+    if manual_house is not None:
+        return {'topic':'other','house':manual_house,'actor_house':1,'method':'дом выбран вручную',
+                'label':'Другое: дом '+str(manual_house),'caution':'Пользователь выбрал дом вручную. Значение дома зависит от контекста вопроса.'}
+    raise ClarificationRequired('Не удалось надёжно определить, о ком или о чём вопрос. Уточните участника в поле ниже — иначе карта может отвечать не на тот вопрос.')
+
+
+def time_hint(question, local_dt, explicit):
+    if explicit is not None:return explicit,'вручную'
+    q=question.lower().replace('ё','е')
+    words={'одну':1,'один':1,'одна':1,'две':2,'два':2,'три':3,'четыре':4,'пять':5,'шесть':6,'семь':7,'восемь':8,'девять':9,'десять':10}
+    verbal=re.search(r'в\s+(?:ближайш\w+\s+)?('+ '|'.join(words) + r')\s+(недел\w*|дн\w*|месяц\w*)',q)
+    if verbal:
+        unit=verbal.group(2);value=words[verbal.group(1)]*(7 if unit.startswith('недел') else 30 if unit.startswith('месяц') else 1)
+        if 1<=value<=365:return value,'из текста вопроса (условная длина месяца — 30 дней)'
+    patterns=[(r'в течение\s+(\d{1,3})\s*дн',1),
+              (r'в (?:ближайш(?:ие|их)|следующ(?:ие|их))\s+(\d{1,3})\s*дн',1),
+              (r'в течение\s+(\d{1,2})\s*недел',7),
+              (r'в (?:ближайш(?:ие|их)|следующ(?:ие|их))\s+(\d{1,2})\s*недел',7),
+              (r'в течение\s+(\d{1,2})\s*месяц',30)]
+    for pattern,mul in patterns:
+        mt=re.search(pattern,q)
+        if mt:
+            value=int(mt.group(1))*mul
+            if 1<=value<=365:return value,'из текста вопроса (условная длина месяца — 30 дней)'
+    if re.search(r'до конца (этой |текущей )?недел',q):
+        day=(6-local_dt.weekday())
+        return max(1,day+1),'из текста вопроса'
+    if re.search(r'до конца (этого |текущего )?месяц',q):
+        if local_dt.month==12:next_month=local_dt.replace(year=local_dt.year+1,month=1,day=1)
+        else:next_month=local_dt.replace(month=local_dt.month+1,day=1)
+        return max(1,(next_month.date()-local_dt.date()).days),'из текста вопроса'
+    return None,'срок не задан'
+
+
+def reception_view(ruler_a,ruler_b,planets):
+    def one(host,visitor):
+        idx=sign_index(planets[host]['longitude']); z=SIGNS[idx]
+        if RULERS[idx]==visitor: return f'{host} находится в знаке обители {visitor}'
+        if EXALT.get(visitor)==z:return f'{host} находится в знаке экзальтации {visitor}'
+        if RULERS[(idx+6)%12]==visitor:return f'{host} находится в знаке изгнания {visitor}'
+        if EXALT.get(visitor)==SIGNS[(idx+6)%12]:return f'{host} находится в знаке падения {visitor}'
+        return f'{host}: нет крупной рецепции {visitor} по знаку'
+    if ruler_a==ruler_b:return []
+    return [one(ruler_a,ruler_b),one(ruler_b,ruler_a)]
+
+
+def obstruction_candidates(jd, actor, subject, planets, main):
+    if not main: return []
+    found=[]
+    for n in planets:
+        if n in (actor,subject):continue
+        e1=future_perfection(jd,actor,n,planets,limit_days=min(365,main['days']+1))
+        e2=future_perfection(jd,subject,n,planets,limit_days=min(365,main['days']+1))
+        for role,event in [('планетой вопроса',e1),('планетой предмета',e2)]:
+            if event and event['days']+0.05 < main['days']:
+                found.append({'planet':n,'with':role,'days':event['days'], 'aspect':event['name']})
+    return sorted(found,key=lambda x:x['days'])[:5]
+
+
+def light_mediators(jd,actor,subject,planets,main):
+    """Candidates only: NOT a full William Lilly judgment."""
+    if actor==subject: return {'translation':[], 'collection':[]}
+    result={'translation':[],'collection':[]}
+    moon=planets['Луна']
+    if actor!='Луна' and subject!='Луна':
+        for source,destination in [(actor,subject),(subject,actor)]:
+            pos=planets[source]
+            past=closest_aspect(moon['longitude'],pos['longitude'],moon['speed'],pos['speed'],3)
+            future=future_perfection(jd,'Луна',destination,planets,35)
+            if past and not past['applying'] and future and future['days'] < 3:
+                result['translation'].append({'from':source,'to':destination,'by':'Луна',
+                   'prior_separation_orb':past['orb'],'new_aspect':future['name'], 'days':future['days']})
+    for mediator in planets:
+        if mediator in (actor,subject,'Луна'):continue
+        x=future_perfection(jd,mediator,actor,planets,30)
+        y=future_perfection(jd,mediator,subject,planets,30)
+        if x and y and x['days'] < 30 and y['days'] < 30:
+            # Collection requires more checks (speeds, application and dignities).
+            result['collection'].append({'by':mediator,'aspect_with_a':x['name'],
+                 'aspect_with_b':y['name'],'first_days':min(x['days'],y['days']),
+                 'last_days':max(x['days'],y['days'])})
+    return result
+
+
+def situational_answer(kind,question,subject_label,period,future,moon_next,reception,obstructions,moon_voc,actor,subject,planets):
+    note='Хорар — символическая астрологическая трактовка, а не способ проверить факты, чужие чувства или точную дату события.'
+    next_lunar=(f"Дальше Луна образует {moon_next[0]['name'].lower()} с {moon_next[0]['planet']} (астрономически через {moon_next[0]['days']:.2f} суток)." if moon_next else 'У Луны не найдено следующего точного мажорного аспекта до выхода из знака.')
+    obs=f"До сближения управителей видна другая точная связь с {obstructions[0]['planet']}; она может осложнять прямой ход дела, но это не доказанный запрет." if obstructions else 'Явного более раннего вмешательства третьей планеты в этот расчёт не внесено.'
+    if kind=='timing':
+        if future:
+            label='Есть ориентир, но не точная дата'
+            summary=(f"Главные показатели сходятся к {future['name'].lower()} примерно через {future['days']:.1f} суток астрономического времени. "
+                'Это дата аспекта планет, а НЕ предсказанная дата события. Для хорарного срока дополнительно оценивают положение домов и скорость развития ситуации.')
+            reasons=[f"Расстояние до точного аспекта будет пройдено через {future['days']:.1f} суток движения планет.",obs,'Символическая единица времени (день, неделя или месяц) без проверки методики не установлена.']
+        else:
+            label='Точная дата пока не определяется';summary='Прямого будущего аспекта главных показателей в их текущих знаках не найдено. Называть дату события было бы выдумкой.'
+            reasons=['Нужны дополнительные способы определения сроков: Луна, перевод света и проверки препятствий.',next_lunar]
+    elif kind=='status':
+        a=planets[actor]; b=planets[subject]
+        def plain_condition(name,pos):
+            dg=essential_dignity(name,pos['longitude'])
+            if 'в обители' in dg or 'в экзальтации' in dg:
+                state='более устойчивое положение и ресурсы'
+            elif 'в изгнании' in dg or 'в падении' in dg:
+                state='более сложные обстоятельства, меньше свободы действий'
+            else:
+                state='смешанные или невыраженные условия'
+            if pos['retrograde']:state+=', возможный возврат к прежнему'
+            return state
+        label='Что показывает карта сейчас'
+        summary=(f"По теме «{subject_label}» карта символически описывает положение сторон. "
+            f"У первой стороны — {plain_condition(actor,a)}; у второй — {plain_condition(subject,b)}. "
+            'Это не проверка реального поведения или чувств людей.')
+        reasons=[next_lunar,('Есть будущий точный аспект основных показателей: ситуация может меняться.' if future else 'Прямой связи, ведущей к точному аспекту до смены знака, пока нет.'),obs]
+    elif kind=='direction':
+        if future:
+            label='Тема может получить развитие'
+            summary=f"Карта показывает возможное движение ситуации к {future['name'].lower()} между главными показателями. " + ('Для благоприятного исхода ещё нужны дополнительные условия.' if future['angle'] in (90,180) else 'Но даже гармоничный аспект не гарантирует желаемого результата.')
+        else:
+            label='Ясный итог пока не виден'
+            summary='Между главными показателями не обнаружено ближайшего завершённого аспекта до смены знака. По одному этому нельзя объявлять ситуацию законченной.'
+        reasons=[next_lunar,obs]
+    else:
+        label='Нужна более конкретная постановка вопроса';summary='Можно построить карту и описать её показатели, но вопрос не задаёт однозначного события, исхода или сроков.'
+        reasons=[next_lunar,'Уточните, какой именно результат хотите проверить, или задайте вопрос «Что происходит?» / «К чему идёт ситуация?».']
+    return {'kind':'unclear' if not future else 'mixed', 'label':label,'summary':summary,'reasons':reasons,'note':note}
+
 
 def norm_signed(angle):
     return (angle + 180) % 360 - 180
@@ -230,9 +444,16 @@ def calculate(payload):
         try:horizon=int(horizon)
         except (ValueError,TypeError):raise ValueError('Срок вопроса должен быть числом дней.')
         if not 1<=horizon<=365:raise ValueError('Срок вопроса — от 1 до 365 дней.')
-    topic = payload.get('topic')
-    if topic not in TOPICS:
-        raise ValueError('Выберите тему вопроса.')
+    requested_topic = payload.get('topic')
+    focus_choice=payload.get('focus_choice')
+    target_house_manual=payload.get('target_house')
+    if target_house_manual is not None and str(target_house_manual).strip() != '':
+        try:target_house_manual=int(target_house_manual)
+        except (TypeError,ValueError):raise ValueError('Выберите дом вопроса от 2 до 12.')
+        if not 2<=target_house_manual<=12: raise ValueError('Дом вопроса должен быть от 2 до 12.')
+    else:target_house_manual=None
+    resolution=resolve_question(question,requested_topic,focus_choice,target_house_manual)
+    topic=resolution['topic']
     city_id = payload.get('city', 'minsk')
     if city_id == 'other':
         try:
@@ -275,12 +496,12 @@ def calculate(payload):
             'speed':round(speed,6), 'sign':SIGNS[sign_index(deg)],'degree':degrees_text(deg),
             'house':house_of(deg,cusps), 'retrograde':speed<0}
     chart_cusps=[{'house':i+1,'longitude':round(v,6),'sign':SIGNS[sign_index(v)],'degree':degrees_text(v)} for i,v in enumerate(cusps)]
-    ruler_a=RULERS[sign_index(cusps[0])]
-    target_house=payload.get('target_house') or TOPICS[topic]['house']
-    try:target_house=int(target_house)
-    except (TypeError,ValueError):raise ValueError('Укажите дом вопроса от 2 до 12.')
-    if not 2<=target_house<=12:raise ValueError('Дом вопроса должен быть от 2 до 12.')
+    actor_house=resolution['actor_house']
+    ruler_a=RULERS[sign_index(cusps[actor_house-1])]
+    target_house=resolution['house']
     ruler_b=RULERS[sign_index(cusps[target_house-1])]
+    horizon,horizon_source=time_hint(question,local_naive,horizon)
+    kind=question_kind(question)
     major_aspect=None
     if ruler_a != ruler_b:
         a,b=planets[ruler_a],planets[ruler_b]
@@ -294,6 +515,9 @@ def calculate(payload):
     future_moon=[{'planet':n,**f} for n in planets if n!='Луна' if (f:=future_perfection(jd,'Луна',n,planets,35))]
     future_moon.sort(key=lambda x:x['days'])
     moon_voc=not bool(future_moon)
+    reception=reception_view(ruler_a,ruler_b,planets)
+    obstruct=obstruction_candidates(jd,ruler_a,ruler_b,planets,future_main)
+    mediators=light_mediators(jd,ruler_a,ruler_b,planets,future_main)
     # Mutual sign-rulership reception; names may rule two different signs.
     mutual=(RULERS[sign_index(planets[ruler_a]['longitude'])] == ruler_b and
             RULERS[sign_index(planets[ruler_b]['longitude'])] == ruler_a) if ruler_a!=ruler_b else False
@@ -302,6 +526,10 @@ def calculate(payload):
     if cusps[0]%30 >27:notes.append('Асцендент в последних 3° знака — возможный признак поздней стадии ситуации. Это не автоматический отказ от ответа.')
     if planets['Сатурн']['house']==7:notes.append('Сатурн в VII доме: традиционное предупреждение о сложности суждения, не самостоятельный признак неудачи.')
     if ruler_a==ruler_b: notes.append('Один и тот же управитель отвечает за оба дома. Для окончательного суждения нужны дополнительные показатели.')
+    if obstruct:notes.append('Возможны вмешивающиеся аспекты третьих планет ДО перфекции; это предварительный список, не окончательный запрет (prohibition).')
+    if mediators['translation']:notes.append('Есть кандидат на перевод света Луной (не окончательное заключение).')
+    if mediators['collection']:notes.append('Есть кандидаты на собирание света (требуют дополнительных проверок).')
+    if resolution.get('caution'): notes.append(resolution['caution'])
     if mutual: notes.append('Есть взаимная рецепция по обители между управителями выбранных домов.')
     if moon_voc: notes.append('По расчёту ближайших точных мажорных аспектов Луна без курса до выхода из знака. Традиции определения Луны без курса различаются.')
     evidence=[]
@@ -332,7 +560,16 @@ def calculate(payload):
     for role,planet in [('Управитель I дома',ruler_a),(f'Управитель {target_house} дома',ruler_b)]:
         evidence.append(f"{role} ({planet}) в знаке {planets[planet]['sign']}: {', '.join(essential_dignity(planet,planets[planet]['longitude']))}.")
     if mutual:evidence.append('Между сигнификаторами есть взаимная рецепция по обители.')
-    evidence.append('Это предварительное традиционное суждение. Не проверены препятствия и запреты, переводы/собирания света, полная рецепция, производные дома и сроки события.')
+    for rec in reception:evidence.append('Рецепция: '+rec+'.')
+    if mediators['translation']:
+        x=mediators['translation'][0]
+        evidence.append(f"Возможный перевод света: Луна отделяется от {x['from']} и приближается к {x['to']}; нужно проверить достаточность орбисов и состояния планет.")
+    if mediators['collection']:
+        x=mediators['collection'][0]
+        evidence.append(f"Кандидат на собирание света планетой {x['by']}; наличие двух аспектов ещё не означает состоявшееся собирание.")
+    if obstruct:
+        c=obstruct[0];evidence.append(f"Возможный дополнительный аспект: {c['planet']} с {c['with']} через {c['days']:.1f} суток (требует ручной оценки вмешательства).")
+    evidence.append('Проверены обители, экзальтации, рецепции по знаку и кандидаты на вмешательство, перевод и собирание света. Окончательное суждение, производные дома и надёжные сроки событий требуют экспертной проверки.')
     all_aspects=[]
     names=list(planets)
     for i,a in enumerate(names):
@@ -342,15 +579,30 @@ def calculate(payload):
             if aspect:
                 all_aspects.append({'a':a,'b':b,**aspect})
     all_aspects.sort(key=lambda x:x['orb'])
-    return {'question':question,'topic':TOPICS[topic]['label'],'scope':TOPICS[topic]['description']+' Дом предмета: '+str(target_house)+' — '+HOUSE_MEANINGS[target_house]+'.',
+    simple=(plain_language_answer(question,topic,horizon,ruler_a,ruler_b,future_main,moon_voc) if kind=='yesno' else
+            situational_answer(kind,question,resolution['label'],horizon,future_main,future_moon,reception,obstruct,moon_voc,ruler_a,ruler_b,planets))
+    # A positive aspect without checking conditions is no more than a possibility.
+    if kind=='yesno' and obstruct and simple['kind']=='positive':
+        simple['kind']='mixed';simple['label']='Возможно, но есть препятствия'
+        simple['summary']='Между главными планетами есть связь, но другие аспекты происходят раньше. Поэтому обещать однозначный исход нельзя.'
+        simple['reasons'].append('Найден кандидат на вмешательство в ход основного аспекта; необходима проверка.')
+    if kind=='yesno' and not future_main and simple['label'].startswith('Скорее нет'):
+        simple['label']='Пока нет ясного подтверждения'
+    if kind=='yesno' and (topic=='other') and simple['kind']=='positive':
+        simple['label']='Есть обнадёживающий признак, но вывод предварительный'
+        simple['summary']='Главные показатели сближаются, но у этого вида вопроса могут быть дополнительные правила, не учтённые автоматически.'
+
+    return {'question':question,'topic':resolution['label'],
+      'scope':f"Сфера: {resolution['label']}. {resolution['method']}. Участник: дом {actor_house}; предмет: дом {target_house} — {HOUSE_MEANINGS[target_house]}.", 
+      'resolution':resolution,'question_kind':kind,'horizon_source':horizon_source,'actor_house':actor_house,
       'city':city_name,'local_time':local.isoformat(timespec='minutes'), 'utc_time':utc.isoformat(timespec='minutes'),
       'timezone':tz_name,'latitude':lat,'longitude':lon,'jd':round(jd,7),
       'asc':round(ax[0],6),'mc':round(ax[1],6),'house_system':'Региомонтан',
       'cusps':chart_cusps,'planets':planets,'aspects':all_aspects,
       'significators':{'self':ruler_a,'subject':ruler_b,'house':target_house,
          'self_pos':planets[ruler_a]['degree'],'subject_pos':planets[ruler_b]['degree']},
-      'horizon_days':horizon,'main_aspect':major_aspect,'future_main_aspect':future_main,'moon_aspect':moon_aspect, 'moon_void_of_course':moon_voc,'moon_next':future_moon[:3], 'mutual_reception':mutual,
+      'horizon_days':horizon,'main_aspect':major_aspect,'future_main_aspect':future_main,'moon_aspect':moon_aspect, 'moon_void_of_course':moon_voc,'moon_next':future_moon[:3], 'mutual_reception':mutual,'receptions':reception,'obstruction_candidates':obstruct,'light_mediators':mediators,
       'warnings':notes,'verdict':verdict,'grade':grade,'evidence':evidence,
-      'simple_answer':plain_language_answer(question,topic,horizon,ruler_a,ruler_b,future_main,moon_voc),
-      'version':'0.3.0 (тестовая версия)', 'ephemeris':'Swiss Ephemeris / Moshier',
+      'simple_answer':simple,
+      'version':'0.4.0 (тестовая версия)', 'ephemeris':'Swiss Ephemeris / Moshier',
       'disclaimer':'Астрологическая интерпретация носит символический характер и не является доказательством будущих событий или чувств других людей.'}

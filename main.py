@@ -5,7 +5,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from horary import CITIES, TOPICS, HOUSE_MEANINGS, FOCUS_CHOICES, ClarificationRequired, calculate
 
-app=FastAPI(title='АстроЛично — Хорар', version='0.4.0')
+app=FastAPI(title='АстроЛично — Хорар', version='0.5.0')
 DIR=Path(__file__).parent
 app.mount('/static',StaticFiles(directory=DIR/'static'),name='static')
 
@@ -33,7 +33,7 @@ def config():
 
 @app.get('/api/health')
 def health():
-    return {'ok':True,'version':'0.4.0'}
+    return {'ok':True,'version':'0.5.0'}
 
 @app.post('/api/horary')
 def chart(body:HoraryRequest):

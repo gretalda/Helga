@@ -28,7 +28,7 @@ def test_config_and_health():
     assert config.status_code == 200
     assert len(config.json()['houses']) == 12
     assert 'minsk' in config.json()['cities']
-    assert run_request('GET', '/api/health').json()['version'] == '0.4.0'
+    assert run_request('GET', '/api/health').json()['version'] == '0.5.0'
 
 def test_calculate_and_horizon():
     resp = run_request('POST', '/api/horary', json=BASE)

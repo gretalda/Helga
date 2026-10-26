@@ -169,17 +169,128 @@ def time_hint(question, local_dt, explicit):
     return None,'срок не задан'
 
 
-def reception_view(ruler_a,ruler_b,planets):
-    def one(host,visitor):
-        idx=sign_index(planets[host]['longitude']); z=SIGNS[idx]
-        if RULERS[idx]==visitor: return f'{host} находится в знаке обители {visitor}'
-        if EXALT.get(visitor)==z:return f'{host} находится в знаке экзальтации {visitor}'
-        if RULERS[(idx+6)%12]==visitor:return f'{host} находится в знаке изгнания {visitor}'
-        if EXALT.get(visitor)==SIGNS[(idx+6)%12]:return f'{host} находится в знаке падения {visitor}'
-        return f'{host}: нет крупной рецепции {visitor} по знаку'
-    if ruler_a==ruler_b:return []
-    return [one(ruler_a,ruler_b),one(ruler_b,ruler_a)]
+# Traditional dignities: Lilly, Christian Astrology (Ptolemaic terms and
+# traditional day/night triplicity rulers). This is an explicit choice of
+# table; Egyptian bounds or participating triplicity yield other results.
+# Entries are exclusive upper degree limits within each 30-degree sign.
+PTOLEMAIC_TERMS = [
+ [('Юпитер',6),('Венера',14),('Меркурий',21),('Марс',26),('Сатурн',30)],
+ [('Венера',8),('Меркурий',15),('Юпитер',22),('Сатурн',27),('Марс',30)],
+ [('Меркурий',7),('Юпитер',14),('Венера',21),('Сатурн',25),('Марс',30)],
+ [('Марс',6),('Юпитер',13),('Меркурий',20),('Венера',27),('Сатурн',30)],
+ [('Сатурн',6),('Меркурий',13),('Венера',19),('Юпитер',25),('Марс',30)],
+ [('Меркурий',7),('Венера',13),('Юпитер',18),('Сатурн',24),('Марс',30)],
+ [('Сатурн',6),('Венера',11),('Юпитер',19),('Меркурий',27),('Марс',30)],
+ [('Марс',6),('Юпитер',14),('Венера',21),('Меркурий',27),('Сатурн',30)],
+ [('Юпитер',8),('Венера',14),('Меркурий',19),('Сатурн',25),('Марс',30)],
+ [('Венера',6),('Меркурий',12),('Юпитер',19),('Марс',25),('Сатурн',30)],
+ [('Сатурн',6),('Меркурий',12),('Венера',20),('Юпитер',25),('Марс',30)],
+ [('Венера',8),('Юпитер',14),('Меркурий',20),('Марс',26),('Сатурн',30)],
+]
+# Fire, earth, air, water; early modern Lilly convention: Mars rules
+# watery triplicity for both day and night.
+TRIPLICITY_DAY = ('Солнце','Венера','Сатурн','Марс')
+TRIPLICITY_NIGHT = ('Юпитер','Луна','Меркурий','Марс')
+# Chaldean order of 36 ten-degree faces, starting with Mars in Aries.
+FACE_ORDER = ('Марс','Солнце','Венера','Меркурий','Луна','Сатурн','Юпитер')
+RECEPTION_WEIGHT = {'обитель':5,'экзальтация':4,'триплицитет':3,'терм':2,'декан':1}
 
+
+def dignity_lords(longitude, is_day):
+    """All five essential dignities at an exact longitude (traditional Lilly table)."""
+    sign=sign_index(longitude)
+    deg=float(longitude)%30
+    bound=next(ruler for ruler,upper in PTOLEMAIC_TERMS[sign] if deg < upper)
+    trip=((sign % 4))
+    # Chaldean faces progress by exactly one planet every 10 zodiac degrees.
+    face=FACE_ORDER[(sign*3+int(deg//10))%7]
+    exalt=next((planet for planet,z in EXALT.items() if z==SIGNS[sign]),None)
+    fall=next((planet for planet,z in EXALT.items() if z==SIGNS[(sign+6)%12]),None)
+    return {'обитель':RULERS[sign], 'экзальтация':exalt,
+            'триплицитет':(TRIPLICITY_DAY if is_day else TRIPLICITY_NIGHT)[trip],
+            'терм':bound,'декан':face,
+            'изгнание':RULERS[(sign+6)%12], 'падение':fall}
+
+
+def dignity_profile(planet, longitude, is_day):
+    owners=dignity_lords(longitude,is_day)
+    own=[type_name for type_name in RECEPTION_WEIGHT if owners[type_name]==planet]
+    weaknesses=[x for x in ('изгнание','падение') if owners[x]==planet]
+    score=sum(RECEPTION_WEIGHT[x] for x in own)-sum({'изгнание':5,'падение':4}[x] for x in weaknesses)
+    return {'planet':planet,'position':degrees_text(longitude),'rulers':owners,
+        'strengths':own,'weaknesses':weaknesses,'score':score,
+        'state':('имеет выраженные достоинства' if score>=4 else
+                 'имеет небольшую опору' if score>0 else
+                 'находится в ослабленном положении' if score<0 else
+                 'не имеет собственных достоинств в этой точке')}
+
+
+def full_reception_analysis(actor,subject,planets,is_day):
+    """Evaluate all five dignity types in both directions; negatives are not receptions."""
+    profiles={p:dignity_profile(p,planets[p]['longitude'],is_day) for p in {actor,subject}}
+    if actor==subject:
+        return {'sect':'дневная' if is_day else 'ночная','table':'Птолемеевы термы; дневные/ночные триплицитеты Лилли; халдейские деканы',
+          'profiles':profiles,'directions':[],'mutual_types':[],'mutual':False,
+          'summary':'Обе стороны имеют одного управителя. Взаимную рецепцию между одной и той же планетой не определяют.',
+          'caution':'Положение одного управителя недостаточно для оценки исхода; учитывайте Луну, аспекты и контекст вопроса.'}
+    directions=[]
+    for guest,receiver in [(actor,subject),(subject,actor)]:
+        owners=dignity_lords(planets[guest]['longitude'],is_day)
+        positive=[x for x in RECEPTION_WEIGHT if owners[x]==receiver]
+        negative=[x for x in ('изгнание','падение') if owners[x]==receiver]
+        directions.append({'guest':guest,'receiver':receiver,'positive':positive,'negative':negative,
+            'strength':sum(RECEPTION_WEIGHT[x] for x in positive),
+            'statement':(f'{receiver} принимает {guest} по '+', '.join(positive) if positive else
+                         f'У {receiver} нет положительной рецепции {guest} по пяти достоинствам')})
+    mutual=(bool(directions[0]['positive']) and bool(directions[1]['positive']))
+    mutual_types=list(directions[0]['positive'])+list(directions[1]['positive']) if mutual else []
+    if mutual:
+        summary=('Есть взаимная рецепция: ' + directions[0]['statement'] + '; ' + directions[1]['statement'] +
+                 '. Это символический показатель взаимного принятия, но не гарантия события или чувств.')
+    elif any(d['positive'] for d in directions):
+        detail='; '.join(x['statement'] for x in directions if x['positive'])
+        summary=f'Рецепция односторонняя: {detail}. Встречного принятия по пяти достоинствам не обнаружено.'
+    else:
+        summary='Положительной рецепции между главными управителями по пяти достоинствам нет.'
+    return {'sect':'дневная' if is_day else 'ночная','table':'Птолемеевы термы; дневные/ночные триплицитеты Лилли; халдейские деканы',
+            'profiles':profiles,'directions':directions,'mutual_types':mutual_types,'mutual':mutual,
+            'summary':summary,
+            'caution':'Наличие рецепции не заменяет перфекцию аспекта и не доказывает поведение, намерения или чувства людей.'}
+
+
+
+def chart_reception_matrix(planets,is_day):
+    """All 7 × 6 directed reception checks, plus mutual pair detection."""
+    directed=[]
+    for guest in PLANET_IDS:
+        owners=dignity_lords(planets[guest]['longitude'],is_day)
+        for receiver in PLANET_IDS:
+            if guest==receiver:continue
+            pos=[t for t in RECEPTION_WEIGHT if owners[t]==receiver]
+            neg=[t for t in ('изгнание','падение') if owners[t]==receiver]
+            directed.append({'guest':guest,'receiver':receiver,'positive':pos,'negative':neg})
+    mutual=[]
+    for i,a in enumerate(PLANET_IDS):
+        for b in list(PLANET_IDS)[i+1:]:
+            ab=next(x for x in directed if x['guest']==a and x['receiver']==b)
+            ba=next(x for x in directed if x['guest']==b and x['receiver']==a)
+            if ab['positive'] and ba['positive']:
+                mutual.append({'a':a,'b':b,'a_received_by_b':ab['positive'], 'b_received_by_a':ba['positive']})
+    return {'checks':len(directed), 'directions':directed,
+            'positive': [x for x in directed if x['positive']],
+            'mutual_pairs':mutual,
+            'profiles':{n:dignity_profile(n,p['longitude'],is_day) for n,p in planets.items()},
+            'sect':'дневная' if is_day else 'ночная'}
+
+
+def reception_view(ruler_a,ruler_b,planets,is_day=False):
+    """Human-readable compatibility field preserved for existing clients."""
+    data=full_reception_analysis(ruler_a,ruler_b,planets,is_day)
+    result=[x['statement'] for x in data['directions']]
+    for x in data['directions']:
+        if x['negative']:
+            result.append(f"{x['guest']} в месте {', '.join(x['negative'])} {x['receiver']} (ослабление, не рецепция)")
+    return result
 
 def obstruction_candidates(jd, actor, subject, planets, main):
     if not main: return []
@@ -359,17 +470,13 @@ def future_perfection(jd, name_a, name_b, initial_positions, limit_days=365):
     return None
 
 
-def essential_dignity(planet, zodiac):
-    descriptions=[]
-    sign=SIGNS[sign_index(zodiac)]
-    if RULERS[sign_index(zodiac)]==planet:descriptions.append('в обители')
-    if EXALT.get(planet)==sign:descriptions.append('в экзальтации')
-    opposite=(sign_index(zodiac)+6)%12
-    if RULERS[opposite]==planet:descriptions.append('в изгнании')
-    if EXALT.get(planet)==SIGNS[opposite]:descriptions.append('в падении')
-    return descriptions or ['без главных эссенциальных достоинств по знаку']
+def essential_dignity(planet, zodiac, is_day=False):
+    profile=dignity_profile(planet,zodiac,is_day)
+    return ([f'в {x}' for x in profile['strengths']] +
+            [f'в {x}' for x in profile['weaknesses']]) or ['без собственных эссенциальных достоинств']
 
-def plain_language_answer(question, topic, horizon, ruler_a, ruler_b, future_main, moon_voc):
+
+def plain_language_answer(question, topic, horizon, ruler_a, ruler_b, future_main, moon_voc, reception_data=None):
     """A cautious, short, question-facing explanation for a non-astrologer.
 
     Interpret *only* the limited rules this prototype has actually calculated;
@@ -410,12 +517,12 @@ def plain_language_answer(question, topic, horizon, ruler_a, ruler_b, future_mai
             return {'kind':'positive','label':'Скорее да',
                 'summary':f'В вопросе об {focus} есть предварительный показатель движения к результату {suffix}. Но уверенно обещать событие по одной связи планет нельзя.',
                 'reasons':[f'Планеты, обозначающие вас и предмет вопроса, идут к точному аспекту ({aspect}).',
-                           'В этой версии ещё не проверены все обстоятельства, которые могут помешать результату.'],
+                           'Рецепции рассчитаны отдельно; также важны препятствия и связи Луны.'],
                 'note':caution}
         return {'kind':'mixed','label':'Возможно, но с трудностями',
             'summary':f'В вопросе об {focus} просматривается развитие {suffix}, однако карта указывает на напряжение. Это не равнозначно однозначному «да».',
             'reasons':[f'Между основными планетами ожидается напряжённый аспект ({aspect}).',
-                       'Для вывода об успехе нужно проверить рецепции, препятствия и остальные показатели карты.'],
+                       'Рецепции проверены по пяти достоинствам. Даже при поддержке планет напряжённый аспект требует осторожности.'],
             'note':caution}
     if horizon is not None:
         if future_main:
@@ -427,9 +534,9 @@ def plain_language_answer(question, topic, horizon, ruler_a, ruler_b, future_mai
             'reasons':[why,'Отсутствие прямой связи само по себе не доказывает, что событие невозможно.'],
             'note':caution}
     reasons=['До выхода планет из своих знаков не найден прямой точный аспект между главными управителями.',
-             'Чтобы судить о возможности события, нужно проверить дополнительные правила хорара.']
+             'Дополнительно смотрите рассчитанные рецепции и аспекты Луны; часть правил перфекции ещё требует проверки.']
     if moon_voc:
-        reasons[1]='Луна также не образует новых основных точных аспектов до выхода из знака; требуются дополнительные проверки.'
+        reasons[1]='Луна также не образует новых основных точных аспектов до выхода из знака; данные рецепций показаны ниже.'
     return {'kind':'unclear','label':'Пока нет ясного «да»',
         'summary':f'В вопросе об {focus} явного прямого подтверждения результата пока не видно. Без срока и более полного разбора нельзя уверенно сказать «нет».',
         'reasons':reasons,'note':caution}
@@ -515,12 +622,16 @@ def calculate(payload):
     future_moon=[{'planet':n,**f} for n in planets if n!='Луна' if (f:=future_perfection(jd,'Луна',n,planets,35))]
     future_moon.sort(key=lambda x:x['days'])
     moon_voc=not bool(future_moon)
-    reception=reception_view(ruler_a,ruler_b,planets)
+    # A traditional chart is diurnal when the Sun is above the horizon.
+    # Regiomontanus houses 7 through 12 lie above the horizon.
+    is_day=planets['Солнце']['house'] in (7,8,9,10,11,12)
+    reception_data=full_reception_analysis(ruler_a,ruler_b,planets,is_day)
+    all_receptions=chart_reception_matrix(planets,is_day)
+    reception=reception_view(ruler_a,ruler_b,planets,is_day)
     obstruct=obstruction_candidates(jd,ruler_a,ruler_b,planets,future_main)
     mediators=light_mediators(jd,ruler_a,ruler_b,planets,future_main)
     # Mutual sign-rulership reception; names may rule two different signs.
-    mutual=(RULERS[sign_index(planets[ruler_a]['longitude'])] == ruler_b and
-            RULERS[sign_index(planets[ruler_b]['longitude'])] == ruler_a) if ruler_a!=ruler_b else False
+    mutual=reception_data['mutual']
     notes=[]
     if cusps[0]%30 < 3:notes.append('Асцендент в первых 3° знака — в традиционном хораре иногда считается признаком раннего вопроса. Это не автоматический запрет на трактовку.')
     if cusps[0]%30 >27:notes.append('Асцендент в последних 3° знака — возможный признак поздней стадии ситуации. Это не автоматический отказ от ответа.')
@@ -530,7 +641,7 @@ def calculate(payload):
     if mediators['translation']:notes.append('Есть кандидат на перевод света Луной (не окончательное заключение).')
     if mediators['collection']:notes.append('Есть кандидаты на собирание света (требуют дополнительных проверок).')
     if resolution.get('caution'): notes.append(resolution['caution'])
-    if mutual: notes.append('Есть взаимная рецепция по обители между управителями выбранных домов.')
+    if mutual: notes.append('Есть взаимная рецепция по традиционным достоинствам между управителями выбранных домов.')
     if moon_voc: notes.append('По расчёту ближайших точных мажорных аспектов Луна без курса до выхода из знака. Традиции определения Луны без курса различаются.')
     evidence=[]
     grade='neutral'
@@ -557,10 +668,10 @@ def calculate(payload):
         evidence.append(f"Следующий точный мажорный аспект Луны в этом знаке: {f['name'].lower()} с планетой {f['planet']} через {f['days']:.2f} суток.")
     else:
         evidence.append('До выхода из знака у Луны не найдено точных мажорных аспектов с семью традиционными планетами.')
-    for role,planet in [('Управитель I дома',ruler_a),(f'Управитель {target_house} дома',ruler_b)]:
-        evidence.append(f"{role} ({planet}) в знаке {planets[planet]['sign']}: {', '.join(essential_dignity(planet,planets[planet]['longitude']))}.")
-    if mutual:evidence.append('Между сигнификаторами есть взаимная рецепция по обители.')
-    for rec in reception:evidence.append('Рецепция: '+rec+'.')
+    for role,planet in [(f'Управитель {actor_house} дома',ruler_a),(f'Управитель {target_house} дома',ruler_b)]:
+        evidence.append(f"{role} ({planet}) в знаке {planets[planet]['sign']}: {', '.join(essential_dignity(planet,planets[planet]['longitude'],is_day))}.")
+    evidence.append('Все пять рецепций проверены ('+reception_data['sect']+' карта): '+reception_data['summary'])
+    for rec in reception:evidence.append('Положение: '+rec+'.')
     if mediators['translation']:
         x=mediators['translation'][0]
         evidence.append(f"Возможный перевод света: Луна отделяется от {x['from']} и приближается к {x['to']}; нужно проверить достаточность орбисов и состояния планет.")
@@ -569,7 +680,7 @@ def calculate(payload):
         evidence.append(f"Кандидат на собирание света планетой {x['by']}; наличие двух аспектов ещё не означает состоявшееся собирание.")
     if obstruct:
         c=obstruct[0];evidence.append(f"Возможный дополнительный аспект: {c['planet']} с {c['with']} через {c['days']:.1f} суток (требует ручной оценки вмешательства).")
-    evidence.append('Проверены обители, экзальтации, рецепции по знаку и кандидаты на вмешательство, перевод и собирание света. Окончательное суждение, производные дома и надёжные сроки событий требуют экспертной проверки.')
+    evidence.append('Проверены обитель, экзальтация, триплицитет, терм, декан и знаковые ослабления; остальные кандидаты на вмешательство, перевод/собирание света пока не являются окончательным суждением. Надёжность сроков требует отдельной проверки.')
     all_aspects=[]
     names=list(planets)
     for i,a in enumerate(names):
@@ -579,8 +690,15 @@ def calculate(payload):
             if aspect:
                 all_aspects.append({'a':a,'b':b,**aspect})
     all_aspects.sort(key=lambda x:x['orb'])
-    simple=(plain_language_answer(question,topic,horizon,ruler_a,ruler_b,future_main,moon_voc) if kind=='yesno' else
+    simple=(plain_language_answer(question,topic,horizon,ruler_a,ruler_b,future_main,moon_voc,reception_data) if kind=='yesno' else
             situational_answer(kind,question,resolution['label'],horizon,future_main,future_moon,reception,obstruct,moon_voc,ruler_a,ruler_b,planets))
+    # Give an immediate plain-language reception finding. Never interpret it as
+    # factual affection or substitute it for a perfected applying aspect.
+    if ruler_a != ruler_b:
+        simple['reasons'].append('Рецепции: '+reception_data['summary'])
+        if simple['kind']=='positive' and not any(row['positive'] for row in reception_data['directions']):
+            simple['kind']='mixed';simple['label']='Есть возможность, но без явной поддержки'
+            simple['summary']='Точный аспект между показателями возможен, однако по всем пяти достоинствам положительного взаимного принятия не обнаружено. Результат не гарантирован.'
     # A positive aspect without checking conditions is no more than a possibility.
     if kind=='yesno' and obstruct and simple['kind']=='positive':
         simple['kind']='mixed';simple['label']='Возможно, но есть препятствия'
@@ -601,8 +719,8 @@ def calculate(payload):
       'cusps':chart_cusps,'planets':planets,'aspects':all_aspects,
       'significators':{'self':ruler_a,'subject':ruler_b,'house':target_house,
          'self_pos':planets[ruler_a]['degree'],'subject_pos':planets[ruler_b]['degree']},
-      'horizon_days':horizon,'main_aspect':major_aspect,'future_main_aspect':future_main,'moon_aspect':moon_aspect, 'moon_void_of_course':moon_voc,'moon_next':future_moon[:3], 'mutual_reception':mutual,'receptions':reception,'obstruction_candidates':obstruct,'light_mediators':mediators,
+      'horizon_days':horizon,'main_aspect':major_aspect,'future_main_aspect':future_main,'moon_aspect':moon_aspect, 'moon_void_of_course':moon_voc,'moon_next':future_moon[:3], 'mutual_reception':mutual,'receptions':reception,'reception_analysis':reception_data,'all_receptions':all_receptions,'obstruction_candidates':obstruct,'light_mediators':mediators,
       'warnings':notes,'verdict':verdict,'grade':grade,'evidence':evidence,
       'simple_answer':simple,
-      'version':'0.4.0 (тестовая версия)', 'ephemeris':'Swiss Ephemeris / Moshier',
+      'version':'0.5.0 (тестовая версия)', 'ephemeris':'Swiss Ephemeris / Moshier',
       'disclaimer':'Астрологическая интерпретация носит символический характер и не является доказательством будущих событий или чувств других людей.'}

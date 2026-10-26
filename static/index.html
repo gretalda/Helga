@@ -33,7 +33,7 @@
 </head>
 <body>
 <div class="shell">
-  <div class="top"><div class="brand">✦ Астро<span>Лично</span></div><div class="prototype">Хорар · версия 0.4.0 <span id="server-state" aria-live="polite">· проверка сервера</span></div></div>
+  <div class="top"><div class="brand">✦ Астро<span>Лично</span></div><div class="prototype">Хорар · версия 0.5.0 <span id="server-state" aria-live="polite">· проверка сервера</span></div></div>
   <header><h1>Ваш вопрос.<br /><em>Его карта.</em></h1><p class="intro">Задайте конкретный вопрос и получите понятный предварительный ответ. Ниже — карта, планеты и объяснение для тех, кто хочет разобраться подробнее.</p></header>
   <div class="layout">
     <section class="panel input-pane">
@@ -74,6 +74,17 @@
           <summary>Показатели карты и подробный разбор</summary>
           <div class="verdict" id="verdict"><div class="labelgold">Предварительное астрологическое суждение</div><strong id="r-verdict"></strong><div id="r-scope" class="caption"></div></div>
           <h3 class="section-title">Главные участники вопроса</h3><div class="significators" id="sigs"></div>
+          <h3 class="section-title">Рецепции: как взаимодействуют стороны</h3>
+          <p class="hint">Проверяются пять видов достоинств обеих планет: обитель, экзальтация, триплицитет, терм и декан. Это символический показатель, а не доказательство чувств.</p>
+          <div class="rec-summary" id="rec-summary"></div>
+          <div class="table-wrap"><table><thead><tr><th>Планета</th><th>Сила / слабость</th><th>Баллы</th></tr></thead><tbody id="rec-scores"></tbody></table></div>
+          <div class="table-wrap"><table><thead><tr><th>Кто принимает</th><th>Кого</th><th>По каким достоинствам</th></tr></thead><tbody id="rec-rows"></tbody></table></div>
+          <div id="rec-note" class="hint"></div>
+          <details class="advanced"><summary>Рецепции всех семи планет (полная таблица)</summary>
+            <p id="all-rec-count" class="hint"></p>
+            <div class="table-wrap"><table><thead><tr><th>Принимает</th><th>Планету</th><th>Положительная рецепция</th><th>Слабость</th></tr></thead><tbody id="all-rec-rows"></tbody></table></div>
+            <p class="hint">В таблице показаны значимые связи; отсутствие строки означает, что положительной рецепции или знакового ослабления между этой парой нет. Все 42 направления рассчитаны.</p>
+          </details>
           <h3 class="section-title">Аргументы карты</h3><ol class="evidence" id="evidence"></ol>
           <div id="warnings" class="warnings hidden"></div>
           <h3 class="section-title">Аспекты планет</h3><div class="table-wrap"><table><thead><tr><th>Планеты</th><th>Аспект</th><th>Орбис</th><th>Состояние</th></tr></thead><tbody id="aspectrows"></tbody></table></div>
@@ -83,7 +94,7 @@
       </div>
     </section>
   </div>
-  <footer>АстроЛично · Версия 0.4.0 · Тестовая версия · Требует сверки с ZET · <a href="https://github.com/gretalda/Helga" rel="noopener noreferrer" target="_blank" style="color:#527078">Исходный код AGPL-3.0</a><p>История вопросов сохраняется только в браузере этого устройства; на сервере вопросы не записываются.</p></footer>
+  <footer>АстроЛично · Версия 0.5.0 · Тестовая версия · Требует сверки с ZET · <a href="https://github.com/gretalda/Helga" rel="noopener noreferrer" target="_blank" style="color:#527078">Исходный код AGPL-3.0</a><p>История вопросов сохраняется только в браузере этого устройства; на сервере вопросы не записываются.</p></footer>
 </div>
 <script>
 const $=id=>document.getElementById(id);
@@ -129,6 +140,19 @@ function report(d){current=d;$('empty').classList.add('hidden');$('report').clas
  $('r-context').textContent='Разбираем: '+(d.resolution?.label || d.topic)+' · '+(d.resolution?.method || 'выбранная тема')+(d.horizon_days?' · Срок: '+d.horizon_days+' дн.':'');
  $('verdict').className='verdict '+d.grade;$('r-verdict').textContent=d.verdict;$('r-scope').textContent=d.scope;
  $('sigs').innerHTML=`<div class="sig"><div class="caption">Сторона вопроса · дом ${d.actor_house||1}</div><div class="big">${safe(d.significators.self)}</div><div class="mini muted">${safe(d.significators.self_pos)}</div></div><div class="sig"><div class="caption">Предмет · ${d.significators.house} дом</div><div class="big">${safe(d.significators.subject)}</div><div class="mini muted">${safe(d.significators.subject_pos)}</div></div>`;
+ const rec=d.reception_analysis;
+ if(rec){
+  $('rec-summary').textContent=`${rec.sect} карта. ${rec.summary}`;
+  $('rec-scores').innerHTML=Object.values(rec.profiles).map(p=>`<tr><td>${safe(p.planet)} · ${safe(p.position)}</td><td>${safe(p.strengths.length?'Сильные: '+p.strengths.join(', '):'Собственных достоинств нет')}${p.weaknesses.length?'<div class=\"smallprint\">Слабые: '+safe(p.weaknesses.join(', '))+'</div>':''}</td><td>${p.score>0?'+':''}${p.score}</td></tr>`).join('');
+  $('rec-rows').innerHTML=rec.directions.length?rec.directions.map(x=>`<tr><td>${safe(x.receiver)}</td><td>${safe(x.guest)}</td><td>${safe(x.positive.length?x.positive.join(', '):'Положительной рецепции нет')}${x.negative.length?'<div class=\"smallprint\">Знак ослабления: '+safe(x.negative.join(', '))+'</div>':''}</td></tr>`).join(''):'<tr><td colspan="3">Управитель у обеих сторон один; взаимная рецепция не оценивается.</td></tr>';
+  $('rec-note').textContent=`Таблица: ${rec.table}. ${rec.caution}`;
+ } else { $('rec-summary').textContent='В сохранённой старой карте нет полного расчёта рецепций. Постройте её заново.';$('rec-scores').innerHTML='';$('rec-rows').innerHTML='';$('rec-note').textContent='';}
+ const all=d.all_receptions;
+ if(all){
+   $('all-rec-count').textContent=`Проверены ${all.checks} направленных пар планет. Положительных рецепций: ${all.positive.length}. Взаимных пар: ${all.mutual_pairs.length}.`;
+   const relevant=all.directions.filter(x=>x.positive.length||x.negative.length);
+   $('all-rec-rows').innerHTML=relevant.length?relevant.map(x=>`<tr><td>${safe(x.receiver)}</td><td>${safe(x.guest)}</td><td>${safe(x.positive.join(', ')||'—')}</td><td>${safe(x.negative.join(', ')||'—')}</td></tr>`).join(''):'<tr><td colspan="4">Выраженных связей нет.</td></tr>';
+ }else{$('all-rec-count').textContent='Старая карта: перестройте, чтобы получить полную таблицу.';$('all-rec-rows').innerHTML='';}
  $('evidence').innerHTML=d.evidence.map(x=>`<li>${safe(x)}</li>`).join('');$('warnings').classList.toggle('hidden',!d.warnings.length);$('warnings').innerHTML=d.warnings.map(w=>`<div>⚑ ${safe(w)}</div>`).join('');
  $('aspectrows').innerHTML=d.aspects.length?d.aspects.map(a=>`<tr><td>${safe(a.a)} / ${safe(a.b)}</td><td>${a.symbol} ${safe(a.name)}</td><td>${a.orb.toFixed(2)}°</td><td>${safe(a.phase)}</td></tr>`).join(''):'<tr><td colspan="4">Близких аспектов не обнаружено.</td></tr>';
  $('r-disclaimer').textContent=d.disclaimer+' Версия '+d.version+'. Движок: '+d.ephemeris+'. Не реализованы все правила традиционного хорара; результаты требуют проверки специалистом.';

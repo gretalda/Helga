@@ -9,7 +9,7 @@ from horary import CITIES, TOPICS, HOUSE_MEANINGS, FOCUS_CHOICES, ClarificationR
 
 from question_context import infer_context, ROLE_OPTIONS, RELATION_OPTIONS
 
-app=FastAPI(title='АстроЛично — персональная астрология', version='1.0.0')
+app=FastAPI(title='АстроЛично — персональная астрология', version='1.1.0')
 DIR=Path(__file__).parent
 app.mount('/static',StaticFiles(directory=DIR/'static'),name='static')
 
@@ -48,7 +48,7 @@ def config():
 
 @app.get('/api/health')
 def health():
-    return {'ok':True,'version':'1.0.0'}
+    return {'ok':True,'version':'1.1.0'}
 
 class AnalyzeRequest(BaseModel):
     question:str=Field(max_length=500)

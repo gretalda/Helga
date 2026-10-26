@@ -12,8 +12,9 @@ from functools import lru_cache
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 import swisseph as swe
 from horary import CITIES
+import forecast_writer as writer
 
-VERSION = '1.0.0'
+VERSION = '1.1.0'
 PLANETS = {'Солнце':swe.SUN, 'Луна':swe.MOON, 'Меркурий':swe.MERCURY,
            'Венера':swe.VENUS,'Марс':swe.MARS,'Юпитер':swe.JUPITER,
            'Сатурн':swe.SATURN,'Уран':swe.URANUS,'Нептун':swe.NEPTUNE,'Плутон':swe.PLUTO}
@@ -231,10 +232,11 @@ def transit(profile,day,mode='transit'):
     if not sections:sections=[{'title':'Фон даты','body':'В выбранный полдень близких мажорных аспектов в орбисе 2° к натальным планетам не найдено. Это не означает отсутствия событий: напряжение или поддержку нельзя вывести только из такого списка.'}]
     title='Твой день' if mode=='day' else 'Транзиты на дату'
     lead=f"На {d.strftime('%d.%m.%Y')} выделены рассчитанные связи между транзитными и натальными планетами. Важно различать кратковременные влияния и более долгий фон."
-    return {'type':mode,'title':title,'lead':lead,'sections':sections,'chart':public_chart(c),
+    result={'type':mode,'title':title,'lead':lead,'sections':sections,'chart':public_chart(c),
             'overlay':{k:round(v['lon'],5) for k,v in pp.items()},'windows':windows,
             'highlights':[{'label':'Дата','value':d.strftime('%d.%m.%Y')},{'label':'Активных аспектов (до 2°)','value':str(len(transit_hits(c,j,2.0)))}],
             'note':'Транзиты рассчитаны на 12:00 местного времени выбранного города. Окна дат получены дневной выборкой: даты пиков ориентировочные, короткие аспекты могли быть пропущены.'}
+    return writer.transit_consultation(result,c,focus,windows,date=day,mode=mode,house_of=house_of)
 
 
 def return_report(profile,when,body='Солнце',year=None):
@@ -283,12 +285,13 @@ def return_report(profile,when,body='Солнце',year=None):
         tops=sorted([(sum(house_of(p[n]['lon'],cusp)==h for n in p),h) for h in range(1,13)],reverse=True)[:3]
         sec.append({'title':'В каких сферах сосредоточены планеты','body':' '.join(f"{count} планет в {h}-м доме ({headings[h]})." for count,h in tops if count>=2) or 'Планеты распределены по разным домам; одной явно преобладающей сферы нет.'})
     sec.append({'title':'Как читать этот цикл','body':f"Начало действия карты — точный момент {start_local.strftime('%d.%m.%Y %H:%M')}; следующий возврат — {end_local.strftime('%d.%m.%Y %H:%M')}. Основные сюжеты выбирайте по дому возвращения, акцентным домам и аспектам к наталу. Для проверки конкретных дней сопоставьте этот фон с транзитами."})
-    return {'type':'solar' if body=='Солнце' else 'lunar','title':label+' · '+('личный год' if body=='Солнце' else 'лунный месяц'),
+    result={'type':'solar' if body=='Солнце' else 'lunar','title':label+' · '+('личный год' if body=='Солнце' else 'лунный месяц'),
             'lead':f"Точное возвращение {body.lower()} рассчитано на {start_local.strftime('%d.%m.%Y в %H:%M')} ({return_place['name']}). Действующий цикл: {period}.",
             'sections':sec,'chart':public_chart(c),'overlay':{k:round(v['lon'],5) for k,v in p.items()},
             'return_chart':{'cusps':[round(v,5) for v in cusp],'angles':axes,'planets':{n:{**zodiac(v['lon']),'house':house_of(v['lon'],cusp)} for n,v in p.items()}},
             'contacts':contacts,'highlights':[{'label':'Начало цикла','value':start_local.strftime('%d.%m.%Y %H:%M')}, {'label':'Конец цикла','value':end_local.strftime('%d.%m.%Y %H:%M')},{'label':'Место возврата','value':return_place['name']}],
             'note':'Дома возврата зависят от фактического места пребывания в момент точного возвращения. Цикл символически описывает темы периода, а не гарантирует события. Аспекты возврата сопоставлены с наталом.'}
+    return writer.return_consultation(result,c,p,cusp,contacts,lum_house,body=body,house_of=house_of,start_local=start_local,end_local=end_local)
 
 
 def compatibility(p1,p2):
@@ -324,20 +327,39 @@ def progressions(profile,day,method='progression'):
     if age<0:raise ValueError('Дата прогноза раньше рождения.')
     if method=='progression':
         j=c['jd']+age
-        moving={name:v for name,v in positions(j).items() if name in ('Солнце','Луна','Меркурий','Венера','Марс')}
+        progressing=('Солнце','Луна','Меркурий','Венера','Марс') if c['time_known'] else ('Солнце','Меркурий','Венера','Марс')
+        moving={name:v for name,v in positions(j).items() if name in progressing}
     else:
         moving={name:{'lon':(v['lon']+age)%360} for name,v in c['raw'].items()}
         for name,lon in c['angles'].items():moving[name]={'lon':(lon+age)%360}
     matches=aspects_of(moving,c['raw'],limit=0.8,identity=False,interchart=True)
+    # Compare the same contact before/after the requested date. This is a trend,
+    # not an invented exact event date or a time of aspect perfection.
+    offset=90.0/365.242190402
+    def at_shift(delta):
+        if method=='progression':
+            pp=positions(c['jd']+age+delta)
+            return {name:v for name,v in pp.items() if name in moving}
+        return {name:{'lon':(c['raw'][name]['lon']+age+delta)%360} for name in moving if name in c['raw']} | {
+            name:{'lon':(c['angles'][name]+age+delta)%360} for name in moving if name in c['angles']}
+    previous,next_=at_shift(-offset),at_shift(offset)
+    for h in matches:
+        name=h['a'];target=h['b'];ang=h['angle']
+        if name in previous and name in next_:
+            natal_pos=c['raw'][target]['lon']
+            orb_before=abs(distance(previous[name]['lon'],natal_pos)-ang)
+            orb_after=abs(distance(next_[name]['lon'],natal_pos)-ang)
+            h['phase']='приближается' if orb_after+0.03<orb_before else 'ослабевает' if orb_after>orb_before+0.03 else 'около максимума'
     secs=[]
     for a in matches[:5]:
         secs.append({'title':f"{a['a']} — {a['aspect']} к натальному {a['b']}", 'body':pretty_event(a,c['raw'])+' Это долгий символический фон, точный момент должен проверяться отдельно.'})
     if not secs:secs=[{'title':'Фон периода','body':'В узком орбисе 0,8° не найдено мажорных аспектов к натальным планетам. Это не является выводом об отсутствии важных перемен.'}]
-    return {'type':method,'title':'Вторичные прогрессии' if method=='progression' else 'Символические дирекции',
+    result={'type':method,'title':'Вторичные прогрессии' if method=='progression' else 'Символические дирекции',
             'lead':f"На {d.strftime('%d.%m.%Y')} возраст в методе составляет {age:.2f} года. "+('В прогрессиях каждому году жизни соответствует примерно один день после рождения.' if method=='progression' else 'В дирекциях используется дуга 1° за год.'),
             'sections':secs,'chart':public_chart(c),'overlay':{name:round(x['lon'],5) for name,x in moving.items()},
             'highlights':[{'label':'Возраст','value':f'{age:.1f} года'},{'label':'Близких аспектов','value':str(len(matches))}],
             'note':'Прогрессии и дирекции — символические астрологические методы. Для прогнозного вывода требуется сопоставление с наталом и другими техниками.'}
+    return writer.progression_consultation(result,c,moving,matches,date=day,method=method,house_of=house_of)
 
 def period(profile,start,end):
     a=dt.date.fromisoformat(start);b=dt.date.fromisoformat(end)
@@ -368,11 +390,12 @@ def period(profile,start,end):
                'body':f"Расчётный интервал {w['start']} — {w['end']}. "+pretty_event(w,c['raw'])}
               for w in picked]
     if not sections:sections=[{'title':'Без ярких пиков','body':'В этом периоде не обнаружено достаточно тесных мажорных транзитных аспектов с указанными орбисами. Это не позволяет утверждать, что событий не будет.'}]
-    return {'type':'period','title':'Личный прогноз на период',
+    result={'type':'period','title':'Личный прогноз на период',
             'lead':f"Период с {a.strftime('%d.%m.%Y')} по {b.strftime('%d.%m.%Y')}. По дням рассчитаны близкие транзитные аспекты к натальной карте; ниже отобраны наиболее точные показатели.",
             'sections':sections,'windows':windows[:40], 'chart':public_chart(c),
             'highlights':[{'label':'Дней в периоде','value':str((b-a).days+1)},{'label':'Расчётных окон','value':str(len(windows))}],
             'note':'Аспекты для периода найдены дневной выборкой в 12:00, поэтому краткие влияния могли быть пропущены. Для синтеза соляра, лунара, прогрессий и дирекций используйте соответствующие разделы.'}
+    return writer.period_consultation(result,c,windows,start=start,end=end,house_of=house_of)
 
 def sign_profile(profile):
     c=chart(profile);p=c['planets']['Солнце'];i=SIGNS.index(p['sign'])

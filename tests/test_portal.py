@@ -40,7 +40,7 @@ class PortalTests(unittest.TestCase):
     def test_home_portal_and_horary_retained(self):
         self.assertIn('Твоя карта',CLIENT.get('/').text)
         self.assertIn('АстроЛично',CLIENT.get('/horary').text)
-        self.assertEqual(CLIENT.get('/api/health').json()['version'],'1.0.0')
+        self.assertEqual(CLIENT.get('/api/health').json()['version'],'1.1.0')
     def test_natal(self):
         x=self.check('natal');self.assertIn('Водолей',x['lead']);self.assertTrue(x['chart']['cusps'])
     def test_transits(self):
